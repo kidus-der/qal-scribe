@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import types
+from unittest import mock
 
 import pytest
 from rich.console import Console
@@ -47,13 +48,8 @@ class FakeController:
         self.languages.append(code)
 
 
-@pytest.fixture(autouse=True)
-def quiet_machine(monkeypatch):
-    monkeypatch.setattr(app_mod, "default_mic", lambda: "Test Microphone")
-
-
-def drive(scenario, *, size=(120, 36), cfg=None, hold=False, ready=True, factory=None):
-    """Run `scenario(app, fake, pilot)` against the app; with ready=True the fake has already emitted Ready."""
+def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None):
+    """Run `scenario(app, fake, pilot)` against the app (fake = the FakeController it started)."""
     made: list[FakeController] = []
 
     def make(c, emit):
@@ -67,7 +63,8 @@ def drive(scenario, *, size=(120, 36), cfg=None, hold=False, ready=True, factory
                 await settle(pilot)
             await scenario(app, made[0] if made else None, pilot)
 
-    asyncio.run(go())
+    with mock.patch.object(app_mod, "mic_name", lambda device=None: "Test Microphone"):  # never open the audio stack
+        asyncio.run(go())
 
 
 async def settle(pilot):
@@ -116,7 +113,8 @@ def rows(app) -> list[str]:
 
 def two_languages(monkeypatch):
     spec = models.MODELS["amh"]
-    monkeypatch.setitem(models.MODELS, "swh", dataclasses.replace(spec, language="swh", language_name="Swahili"))
+    swahili = dataclasses.replace(spec, language="swh", language_name="Swahili")
+    monkeypatch.setitem(models.MODELS, "swh", swahili)
 
 
 def test_importing_the_app_does_not_load_torch():
@@ -135,6 +133,8 @@ def test_paints_while_the_model_loads():
         text = screen_text(app)
         assert "downloading model 40%" in text and "━" in text
         assert app.screen.has_class("-loading")
+        await pilot.press("m")  # the UI thread is free while start() blocks
+        assert app.screen.has_class("-compact")
         fake.hold.set()
         await settle(pilot)
         assert pill(app) == "READY"
@@ -208,6 +208,7 @@ def test_stop_shows_transcribing_then_the_result():
     async def scenario(app, fake, pilot):
         await send(pilot, ev.RecordingStarted("dictate"), ev.RecordingStopped("dictate", 3.2))
         assert "TRANSCRIBING" in pill(app) and app.screen.has_class("-transcribing")
+        assert "Transcribing…" in screen_text(app) and "Hold Right Option" not in screen_text(app)
         assert max(app.query_one(Meter).levels) == 0.0
         await send(pilot, done())
         assert pill(app) == "READY"
@@ -225,6 +226,7 @@ def test_translate_mode_has_its_own_pill_title_and_border():
         assert app.query_one("#stage").border_title == "Translate → English"
         await send(pilot, ev.RecordingStopped("translate", 2.0))
         assert "TRANSLATE" in pill(app) and app.screen.has_class("-translating")
+        assert "Translating…" in screen_text(app)
         await send(pilot, done("hello world", mode="translate"))
         assert pill(app) == "READY" and "→ EN" in screen_text(app)
 
@@ -253,7 +255,8 @@ def test_a_language_switch_reload_shows_loading_again():
 
 def test_a_new_recording_wins_over_a_clip_still_being_transcribed():
     async def scenario(app, fake, pilot):
-        await send(pilot, ev.RecordingStarted("dictate"), ev.RecordingStopped("dictate", 1.0), ev.RecordingStarted("dictate"))
+        await send(pilot, ev.RecordingStarted("dictate"), ev.RecordingStopped("dictate", 1.0))
+        await send(pilot, ev.RecordingStarted("dictate"))
         assert pill(app).startswith("● REC")
         await send(pilot, done())
         assert pill(app).startswith("● REC")
@@ -296,7 +299,8 @@ def test_transcripts_with_markup_characters_render_literally():
 
 def test_notices_become_toasts_with_matching_severity():
     async def scenario(app, fake, pilot):
-        await send(pilot, ev.Notice("fyi", "info"), ev.Notice("careful", "warning"), ev.Notice("broke", "error"))
+        await send(pilot, ev.Notice("fyi", "info"), ev.Notice("careful", "warning"))
+        await send(pilot, ev.Notice("broke", "error"))
         assert toasts(app) == [("fyi", "information"), ("careful", "warning"), ("broke", "error")]
 
     drive(scenario)
@@ -307,7 +311,8 @@ def test_notices_become_toasts_with_matching_severity():
 
 def test_history_is_newest_first_with_time_mode_stats_and_paste_flag():
     async def scenario(app, fake, pilot):
-        await send(pilot, done("አንድ", audio=1.0, compute=0.1), done("ሁለት", mode="translate", pasted=False, audio=2.5, compute=0.2))
+        await send(pilot, done("አንድ", audio=1.0, compute=0.1))
+        await send(pilot, done("ሁለት", mode="translate", pasted=False, audio=2.5, compute=0.2))
         assert rows(app) == ["ሁለት", "አንድ"]
         text = screen_text(app)
         assert re.search(r"\d\d:\d\d:\d\d", text) and "→ EN" in text and "dictate" in text
@@ -546,3 +551,18 @@ def test_run_hard_exits_only_while_the_controller_is_still_starting(monkeypatch)
     still_loading = False
     app_mod.run(Config())
     assert exits == [0]
+
+
+def test_mic_name_follows_the_configured_device_and_never_raises(monkeypatch):
+    asked = []
+
+    def query_devices(device=None, kind=None):
+        asked.append(device)
+        if device == "missing":
+            raise ValueError("no such device")
+        return {"name": "USB Mic"}
+
+    monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(query_devices=query_devices))
+    assert app_mod.mic_name() == "USB Mic" and app_mod.mic_name("2") == "USB Mic"
+    assert asked == [None, 2]  # "2" in a config file means device index 2
+    assert app_mod.mic_name("missing") is None

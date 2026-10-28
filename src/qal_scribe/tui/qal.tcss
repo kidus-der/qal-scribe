@@ -51,7 +51,6 @@ Screen {
     text-align: center;
     text-style: bold;
     color: $accent;
-    padding-top: 1;
 }
 #hero {
     width: 100%;

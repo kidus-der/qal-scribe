@@ -63,7 +63,7 @@ class Meter(Widget):
         width, height = self.size
         _, base = self.background_colors
         low, high, clip = (
-            (base + self.get_component_styles(f"meter--{n}").color).rich_color for n in ("low", "high", "clip")
+            (base + self.get_component_styles(f"meter--{name}").color).rich_color for name in ("low", "high", "clip")
         )
         background = base.rich_color
         row_from_bottom = height - 1 - y
@@ -73,7 +73,8 @@ class Meter(Widget):
             color = clip if level > 0.95 else high if level > 0.45 else low
             segments.append(Segment(BLOCKS[min(8, max(0, eighths))], Style(color=color, bgcolor=background)))
         pad = width - len(segments)
-        return Strip([Segment(" " * pad, Style(bgcolor=background)), *segments] if pad > 0 else segments, width)
+        blank = [Segment(" " * pad, Style(bgcolor=background))] if pad > 0 else []
+        return Strip([*blank, *segments], width)
 
 
 class TopBar(Horizontal):
@@ -96,7 +97,7 @@ class Reading(VerticalScroll, can_focus=False):
 
 
 class Stage(Vertical):
-    """The centre panel: meter, then the live partial / latest transcript or a designed empty/loading state."""
+    """The centre panel: meter, then the live partial / latest transcript or an empty/loading state."""
 
     def compose(self) -> ComposeResult:
         yield Meter(id="meter")
@@ -131,6 +132,7 @@ class HistoryRow(ListItem):
         e = self.entry
         yield Static(self.stamp, classes="time")
         yield Static("dictate" if e.mode == "dictate" else "→ EN", classes="mode")
-        yield Static(e.text or "(nothing recognised)", classes="text" if e.text else "text empty", markup=False)
+        yield Static(e.text or "(nothing recognised)", classes="text" if e.text else "text empty",
+                     markup=False)
         yield Static(stats(e.audio_seconds, e.compute_seconds), classes="stats")
         yield Static("✓" if e.pasted else "✗", classes="paste ok" if e.pasted else "paste no")

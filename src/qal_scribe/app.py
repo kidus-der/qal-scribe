@@ -56,11 +56,14 @@ class StartFailed(Message):
         self.problem = problem
 
 
-def default_mic() -> str | None:
+def mic_name(device: str | int | None = None) -> str | None:
+    """Name of the input device the recorder will use (cfg.mic: name substring, index or None = default)."""
     try:
         import sounddevice
 
-        return sounddevice.query_devices(kind="input")["name"]
+        if isinstance(device, str) and device.isdigit():
+            device = int(device)
+        return sounddevice.query_devices(device, kind="input")["name"]
     except Exception:  # noqa: BLE001 - no audio stack or input device just means no mic name in the header
         return None
 
@@ -76,7 +79,7 @@ class QalApp(App):
     CSS_PATH = "tui/qal.tcss"
     ENABLE_COMMAND_PALETTE = False
     HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (110, "-wide")]  # noqa: RUF012 (Textual convention)
-    VERTICAL_BREAKPOINTS = [(0, "-tiny"), (4, "-small")]  # noqa: RUF012 (compact mode drops the footer at 3 lines)
+    VERTICAL_BREAKPOINTS = [(0, "-tiny"), (4, "-small")]  # noqa: RUF012 (-tiny: compact drops the footer)
     BINDINGS = [  # noqa: RUF012 (Textual convention)
         Binding("c", "copy", "Copy last"),
         Binding("l", "language", "Language"),
@@ -126,7 +129,8 @@ class QalApp(App):
         self.screen.set_class(self.cfg.compact, "-compact")
         self.query_one("#history-panel").border_title = "History"
         self.set_interval(0.1, self.tick)
-        self.run_worker(default_mic, thread=True, name="mic", group="mic", exit_on_error=False)
+        mic = getattr(self.cfg, "mic", None)  # Config.mic arrives with the platform workstream
+        self.run_worker(lambda: mic_name(mic), thread=True, name="mic", group="mic", exit_on_error=False)
         # A daemon thread, not a Textual worker: those are joined at exit, which would hold `q` hostage
         # until a first-run model download finishes.
         self.boot_thread = threading.Thread(target=self.boot, name="controller-start", daemon=True)
@@ -134,10 +138,13 @@ class QalApp(App):
         self.refresh_view()
 
     def boot(self) -> None:
+        def emit(event: ev.Event) -> None:
+            self.post_message(ControllerEvent(event))
+
         try:
-            self.controller = self.controller_factory(self.cfg, lambda e: self.post_message(ControllerEvent(e)))
+            self.controller = self.controller_factory(self.cfg, emit)
             self.controller.start()
-        except Exception as e:  # noqa: BLE001 - whatever stopped the model or hotkeys from starting goes on screen
+        except Exception as e:  # noqa: BLE001 - whatever stopped the model or hotkeys starting goes on screen
             self.post_message(StartFailed(f"{type(e).__name__}: {e}"))
 
     # -- events from the controller -------------------------------------------------------------------------
@@ -152,7 +159,8 @@ class QalApp(App):
                 self.loading_message = text
                 self.loading = self.loading or not (self.rec_mode or self.pending)  # else: translation model
             case ev.Ready() as ready:
-                self.info, self.language, self.loading, self.loading_message = ready, ready.language, False, ""
+                self.info, self.language = ready, ready.language
+                self.loading, self.loading_message = False, ""
             case ev.RecordingStarted(mode):
                 self.rec_mode, self.rec_started, self.partial = mode, time.monotonic(), ""
                 self.query_one(Meter).reset()
@@ -199,6 +207,10 @@ class QalApp(App):
     # -- state -> pixels ------------------------------------------------------------------------------------
 
     @property
+    def hotkeys(self) -> dict[str, ev.Mode]:
+        return self.info.hotkeys if self.info else {}
+
+    @property
     def state(self) -> str:
         if self.failure:
             return "failed"
@@ -233,7 +245,8 @@ class QalApp(App):
         if not self.info:
             return Content("")
         name = models.MODELS[self.info.language].language_name if self.info.language in models.MODELS else ""
-        parts = [name, self.info.model.rsplit("/", 1)[-1], self.info.device, "LM on" if self.info.lm else "LM off"]
+        model = self.info.model.rsplit("/", 1)[-1]
+        parts = [name, model, self.info.device, "LM on" if self.info.lm else "LM off"]
         if self.mic:
             parts.append(f"mic {self.mic}")
         return Content(" · ".join(p for p in parts if p))
@@ -247,8 +260,12 @@ class QalApp(App):
                 done, rest = progress_bar(int(percent[1]))
                 parts += ["\n", (done, "$accent"), (rest, "$border")]
             return Content.assemble(*parts)
+        if self.pending:
+            verb = "Translating" if self.pending[0] == "translate" else "Transcribing"
+            return Content(f"{SPINNER[self.spin]}  {verb}…")
         verbs = {"dictate": "dictate Amharic", "translate": "translate to English"}
-        lines = [Content.assemble("Hold ", (key, "bold $accent"), f" to {verbs[mode]}") for key, mode in self.info.hotkeys.items()]
+        lines = [Content.assemble("Hold ", (key, "bold $accent"), f" to {verbs[mode]}")
+                 for key, mode in self.hotkeys.items()]
         return Content("\n").join([*lines, Content("Release to paste at your cursor.")])
 
     def refresh_view(self) -> None:
@@ -258,8 +275,8 @@ class QalApp(App):
         top = self.query_one(TopBar)
         top.set_pill(self.pill_label())
         top.set_status(self.status_line())
-        hotkeys = self.info.hotkeys if self.info else {}
-        self.query_one("#keys", Static).update("  ".join(f"{key} {mode}" for key, mode in hotkeys.items()))
+        keys = "  ".join(f"{key} {mode}" for key, mode in self.hotkeys.items())
+        self.query_one("#keys", Static).update(keys)
         stage = self.query_one(Stage)
         stage.border_title = "Starting" if state in ("loading", "failed") else MODE_NAMES[self.active_mode()]
         stage.border_subtitle = self.stage_subtitle()
@@ -275,17 +292,20 @@ class QalApp(App):
         self.query_one("#history-panel").border_subtitle = HISTORY_LEGEND if len(history) else ""
 
     def active_mode(self) -> ev.Mode:
-        return self.rec_mode or (self.pending[0] if self.pending else self.last.mode if self.last else "dictate")
+        if self.rec_mode or self.pending:
+            return self.rec_mode or self.pending[0]
+        return self.last.mode if self.last else "dictate"
 
     def stage_subtitle(self) -> str:
         if self.rec_mode:
-            key = next((k for k, m in (self.info.hotkeys if self.info else {}).items() if m == self.rec_mode), "key")
+            key = next((k for k, m in self.hotkeys.items() if m == self.rec_mode), "key")
             return f"release {key} to finish"
         if self.pending:
             return self.loading_message
         if self.last and self.state == "ready":
             e = self.last
-            return f"{e.audio_seconds:.1f}s audio · {e.compute_seconds:.2f}s compute · {'pasted' if e.pasted else 'not pasted'}"
+            pasted = "pasted" if e.pasted else "not pasted"
+            return f"{e.audio_seconds:.1f}s audio · {e.compute_seconds:.2f}s compute · {pasted}"
         return ""
 
     # -- actions --------------------------------------------------------------------------------------------
@@ -312,10 +332,11 @@ class QalApp(App):
         elif switch is None:
             self.notify("language switching is not available yet", severity="warning", timeout=3)
         else:
-            code = codes[(codes.index(self.language) + 1) % len(codes)] if self.language in codes else codes[0]
+            here = codes.index(self.language) if self.language in codes else -1
+            code = codes[(here + 1) % len(codes)]
             self.notify(f"language: {models.MODELS[code].language_name}", timeout=3)
-            self.run_worker(lambda: switch(code), thread=True, name="language", group="language", exclusive=True,
-                            exit_on_error=False)
+            self.run_worker(lambda: switch(code), thread=True, name="language", group="language",
+                            exclusive=True, exit_on_error=False)
 
     def action_cycle_theme(self) -> None:
         names = ["qal", "qal-light", *(n for n in self.available_themes if not n.startswith("qal"))]
