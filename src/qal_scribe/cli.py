@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("file")
     t.add_argument("--translate", action="store_true", help="translate to English")
     sub.add_parser("about", help="licences and model attribution")
-    sub.add_parser("toggle", help="start/stop recording in the running instance (for Wayland key bindings)")
+    tg = sub.add_parser("toggle", help="start/stop recording in the running instance (for Wayland key bindings)")
+    tg.add_argument("--translate", action="store_true", help="translate to English")
     args = p.parse_args(argv)
 
     from pathlib import Path
@@ -63,7 +64,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "toggle":
         from qal_scribe.ipc import send_toggle
 
-        sys.exit(send_toggle())
+        sys.exit(send_toggle("translate" if args.translate else "dictate"))
     elif args.plain:
         from qal_scribe.plain import run
 

@@ -24,6 +24,7 @@ class Config:
     sounds: bool = True
     theme: str = "qal"
     compact: bool = False
+    mic: str | None = None  # input device name (substring) or index; None = system default
 
 
 def load(path: Path | None = None) -> Config:
