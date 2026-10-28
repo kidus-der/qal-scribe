@@ -54,6 +54,9 @@ class Engine:
         on_progress(f"loading on {self.device}")
         self.processor = AutoProcessor.from_pretrained(path)
         self.model = AutoModelForCTC.from_pretrained(path, dtype=self.dtype).eval().to(self.device)
+        if self.use_lm:
+            on_progress("loading language model")
+            self.lm = decode.load_lm(path, self.spec)
         self.transcribe(np.zeros(SAMPLE_RATE, dtype="float32"))  # warm-up: GPU kernels compile on first use
 
     def logits(self, audio: np.ndarray) -> np.ndarray:

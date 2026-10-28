@@ -14,5 +14,11 @@ def greedy(logits: np.ndarray, processor, spec: ModelSpec) -> str:
     return " ".join(text.split())
 
 
+def load_lm(model_dir, spec: ModelSpec):
+    """Return an object with .decode(logits) -> str using spec.lm_file inside model_dir, or None when the LM
+    or its decoder library is unavailable (callers then fall back to greedy). Workstream `lm`."""
+    return
+
+
 def decode(logits: np.ndarray, processor, spec: ModelSpec, lm=None) -> str:
     return greedy(logits, processor, spec) if lm is None else lm.decode(logits)

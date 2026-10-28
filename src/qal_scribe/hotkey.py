@@ -21,6 +21,7 @@ class PushToTalk:
         self._keys = {getattr(keyboard.Key, name): mode for name, mode in keys.items()}
         self._on_start, self._on_stop = on_start, on_stop
         self._held = None
+        self.reason: str | None = None  # set when global keys can't work here (e.g. Wayland); UI shows it
         self._listener = keyboard.Listener(on_press=self._press, on_release=self._release, daemon=True)
 
     def _press(self, key) -> None:

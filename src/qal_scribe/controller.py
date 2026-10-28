@@ -12,7 +12,7 @@ import numpy as np
 
 from qal_scribe import config as config_mod
 from qal_scribe import events as ev
-from qal_scribe import models, paste, postprocess
+from qal_scribe import ipc, models, paste, postprocess
 from qal_scribe.audio import SAMPLE_RATE, Recorder, play_cue
 from qal_scribe.engine import Engine
 from qal_scribe.hotkey import PushToTalk, key_label
@@ -58,6 +58,9 @@ class Controller:
         self.recorder = Recorder(on_level=self._level)
         self.hotkeys = PushToTalk(self.keys(), self._start_recording, self._stop_recording)
         self.hotkeys.start()
+        if self.hotkeys.reason:
+            self.emit(ev.Notice(self.hotkeys.reason, "warning"))
+        ipc.serve(self.toggle)
         threading.Thread(target=self._worker, daemon=True).start()
         self.emit(ev.Ready(self.engine.device, self.spec.repo, self.spec.language, self.engine.lm is not None,
                            {key_label(k): m for k, m in self.keys().items()}))
