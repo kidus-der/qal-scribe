@@ -219,6 +219,21 @@ wheels = [
 ]
 
 [[package]]
+name = "flashlight-text"
+version = "0.0.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/b8/83f5a6a5aae7acc9289acd0c1e9ef954ccb881a912019f7bbb35f7d3a4cb/flashlight-text-0.0.7.tar.gz", hash = "sha256:fb63779b4b642c0c59e66386f43db8357836ed1be82b49d30155f7c39136d836", size = 60323, upload-time = "2024-03-23T03:06:35.655Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/2f/c21521d54160f896443f0fb2dc506af11dc2f2de0183f30f974008864923/flashlight_text-0.0.7-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:1bbc4ac16516a90eab302a0c573484e896a0d337fbc1fac18a8ad2097024c22f", size = 1039494, upload-time = "2024-03-23T03:05:36.519Z" },
+    { url = "https://files.pythonhosted.org/packages/93/10/e58aced1b7b2dd0365696e364841faf87dd37d238c7737c457191a1892ae/flashlight_text-0.0.7-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:be0b68c25c38b518db389bc00e8e637f53cb73e6336d11e50a422dd398bc63a0", size = 913909, upload-time = "2024-03-23T03:39:53.453Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/bd/3d21cdd54c3b58d96284c6c4d3cb4f4f0f44a1a59f7549a460d832b15ed2/flashlight_text-0.0.7-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:cbfafc3ed32e5aeec17ac2c14ffbe0f1a8b7cd873a0349859182e546c7246964", size = 1248329, upload-time = "2024-03-23T03:39:55.581Z" },
+    { url = "https://files.pythonhosted.org/packages/30/81/76376714d8ce332203fbe99ea48efc856a7ac9cd222bb76100857f15c3d8/flashlight_text-0.0.7-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6570039ce70429cecb84ea3c6bae212607c5f0b97c0cd769aed7276ad4a70361", size = 1304673, upload-time = "2024-03-23T03:05:38.149Z" },
+    { url = "https://files.pythonhosted.org/packages/81/c1/27c8aea11e899653df876e29f14a1eff49b446a7cef39de53abb88980bab/flashlight_text-0.0.7-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:c314908d2621d77782ecfda2101f3eb5c516862234135a7765bda146ca23bd0e", size = 1621003, upload-time = "2024-03-23T03:39:58.537Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/3f/dc8eadf6c1851e1bf2aa49fb7999756d6fa49d940955bb21931bcd73207c/flashlight_text-0.0.7-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:61b0c4af1972aabcd986ec5c5c816dd88780d31028202e0f3604b6791c7b7753", size = 1683620, upload-time = "2024-03-23T03:05:40.351Z" },
+    { url = "https://files.pythonhosted.org/packages/32/85/8ee20d7257a32f8b747386e62889571137de756ea06e6eb7e8b94d68c927/flashlight_text-0.0.7-cp312-cp312-win_amd64.whl", hash = "sha256:6c64925076d3465e6162a62db4039fe4c68ce4144daeff1acab41547311f4c56", size = 496885, upload-time = "2024-03-23T03:05:41.926Z" },
+]
+
+[[package]]
 name = "fsspec"
 version = "2026.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -988,6 +1003,7 @@ name = "qal-scribe"
 version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
+    { name = "flashlight-text", marker = "python_full_version < '3.13'" },
     { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "pynput" },
@@ -1010,6 +1026,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "flashlight-text", marker = "python_full_version < '3.13'", specifier = ">=0.0.7" },
     { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pynput", specifier = ">=1.8" },

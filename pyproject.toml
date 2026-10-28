@@ -20,6 +20,7 @@ dependencies = [
     "pyobjc-framework-applicationservices>=12.0; sys_platform == 'darwin'",
     "pyobjc-framework-cocoa>=12.0; sys_platform == 'darwin'",
     "pyobjc-framework-quartz>=12.0; sys_platform == 'darwin'",
+    "flashlight-text>=0.0.7 ; python_full_version < '3.13'",
 ]
 
 [project.scripts]
