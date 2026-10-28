@@ -1,0 +1,11 @@
+qal-scribe is MIT licensed (see LICENSE). It downloads third-party model
+weights at runtime; those weights are not part of this package and keep
+their own licences:
+
+- snapwre/hohe-asr-amharic (speech recognition)
+  https://huggingface.co/snapwre/hohe-asr-amharic
+  Licence: CC-BY-4.0 https://creativecommons.org/licenses/by/4.0/
+
+- facebook/nllb-200-distilled-600M (optional Amharic -> English translation)
+  https://huggingface.co/facebook/nllb-200-distilled-600M
+  Licence: CC-BY-NC-4.0 (non-commercial) https://creativecommons.org/licenses/by-nc/4.0/

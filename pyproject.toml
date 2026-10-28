@@ -1,0 +1,48 @@
+[project]
+name = "qal-scribe"
+version = "0.1.0.dev0"
+description = "On-device push-to-talk dictation for Amharic"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "kidus-der" }]
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface-hub>=1.0",
+    "numpy>=2.0",
+    "pynput>=1.8",
+    "rich>=14.0",
+    "sounddevice>=0.5",
+    "soundfile>=0.13",
+    "textual>=8.0",
+    "torch>=2.8",
+    "transformers>=5.0",
+    "pyobjc-framework-applicationservices>=12.0; sys_platform == 'darwin'",
+    "pyobjc-framework-cocoa>=12.0; sys_platform == 'darwin'",
+    "pyobjc-framework-quartz>=12.0; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+qal-scribe = "qal_scribe.cli:main"
+
+[project.urls]
+Repository = "https://github.com/kidus-der/qal-scribe"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qal_scribe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["model: loads real model weights (run via scripts/gpu_lock.py, excluded by default)"]
+addopts = "-m 'not model'"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
