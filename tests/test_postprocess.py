@@ -171,6 +171,30 @@ def test_large_numbers_round_trip():
         assert numbers_to_digits(spell(n)) == str(n), spell(n)
 
 
+@pytest.mark.parametrize(
+    ("spoken", "digits"),
+    [
+        ("አስራ ዘጠኝ መቶ ሰማንያ አምስት", "1985"), ("አስራ ዘጠኝ መቶ ሰባ ስድስት", "1976"), ("አስራ ዘጠኝ መቶ", "1900"),
+        ("ሃያ አምስት መቶ", "2500"), ("አስር መቶ", "1000"), ("አስራ ሁለት መቶ ሃምሳ", "1250"), ("ዘጠና መቶ", "9000"),
+        ("በአስራ ዘጠኝ መቶ ሰባ ስድስት ተወለድኩ", "በ1976 ተወለድኩ"), ("ሃያ አምስት መቶ ሺህ", "2500000"),
+    ],
+)
+def test_two_digit_value_before_hundred_is_that_many_hundreds(spoken, digits):
+    assert numbers_to_digits(spoken) == digits
+
+
+@pytest.mark.parametrize(
+    ("spoken", "digits"),
+    [
+        ("ሁለት ሺህ አስራ ዘጠኝ መቶ", "2000 1900"), ("ሁለት ሚሊዮን ሃያ አምስት መቶ", "2000000 2500"),
+        ("ሁለት መቶ ሃያ አምስት መቶ", "200 2500"), ("መቶ ሃያ መቶ", "100 2000"), ("ሃያ ሁለት መቶ ሶስት መቶ", "2200 300"),
+        ("ሁለት መቶ ሃያ አምስት", "225"), ("አስራ ዘጠኝ መቶ ሰማንያ ሶስት መቶ", "1900 8300"),
+    ],
+)
+def test_year_style_hundreds_do_not_merge_with_neighbours(spoken, digits):
+    assert numbers_to_digits(spoken) == digits
+
+
 @pytest.mark.parametrize(("a", "b"), [(5, 7), (20, 30), (13, 20), (7, 20), (900, 800), (3000, 4000), (10, 5)])
 def test_neighbouring_numbers_stay_separate(a, b):
     assert numbers_to_digits(f"{spell(a)} {spell(b)}") == f"{a} {b}"
@@ -358,6 +382,36 @@ def test_comma_rule_is_conservative():
     assert add_punctuation("እሱ ግን አልመጣም") == "እሱ ግን አልመጣም።"  # a bare ግን follows its subject
     assert add_punctuation("ሄድኩ፣ ነገር ግን አልመጣም") == "ሄድኩ፣ ነገር ግን አልመጣም።"  # already there
     assert add_punctuation("ሄድኩ። ሆኖም ተመለሰ") == "ሄድኩ። ሆኖም ተመለሰ።"
+
+
+def test_comma_rule_skips_the_noun_after_a_demonstrative():
+    for demonstrative in ["ይህ", "ያ", "ይሄ", "ይኸ"]:
+        text = f"{demonstrative} ነገር ግን ጥሩ ነው"
+        assert add_punctuation(text) == text + "።"
+    assert add_punctuation("ከሰይህ ነገር ግን ጥሩ ነው") == "ከሰይህ፣ ነገር ግን ጥሩ ነው።"  # ይህ only as a whole word
+
+
+def test_maybe_written_as_two_words_is_not_a_question():
+    assert add_punctuation("ምን አልባት ይመጣል") == "ምን አልባት ይመጣል።"
+    assert add_punctuation("ምን አልባት ማን መጣ") == "ምን አልባት ማን መጣ?"
+
+
+def test_documented_wrong_marks():  # pinned so a change to the rules is a conscious one
+    assert add_punctuation("እንዴት ደስ ይላል") == "እንዴት ደስ ይላል?"
+    assert add_punctuation("ዛሬ ትመጣለህ") == "ዛሬ ትመጣለህ።"
+
+
+def test_documented_number_false_positives():
+    assert numbers_to_digits("አርባ ምንጭ") == "40 ምንጭ"
+    assert numbers_to_digits("በአንድ ላይ") == "በ1 ላይ"
+    assert numbers_to_digits("ከመቶ ሃምሳ") == "ከ150"
+
+
+def test_word_list_wanted_text_still_goes_through_later_steps():
+    words = {"አርባ ምንጭ": "አርባ ምንጭ", "ዓ.ም": "ዓ.ም"}
+    cfg = Config(merge_homophones=True, numbers_to_digits=True)
+    assert process("አርባ ምንጭ በሁለት ሺህ ዓ.ም", cfg, words) == "40 ምንጭ በ2000 አ.ም"
+    assert process("አርባ ምንጭ", Config(), words) == "አርባ ምንጭ"
 
 
 def test_punctuation_runs_after_numbers():

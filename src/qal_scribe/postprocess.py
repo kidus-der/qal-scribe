@@ -6,15 +6,21 @@ Order: whitespace, word list, homophones, numbers, punctuation; whitespace is no
 
 Word list (`heard => wanted`): whole words and multi-word phrases, longest phrase first, so `ኮድ ኤዲተር` beats
 `ኮድ`. Matching ignores homophone spelling (ሠላም matches a `ሰላም` entry); `wanted` may be English or empty
-(deletes the word). Affixed forms (ከርሰርን) are different words and need their own entry.
+(deletes the word). Affixed forms (ከርሰርን) are different words and need their own entry. The `wanted` text is not
+protected: it still goes through merge_homophones and numbers_to_digits, so an entry such as `ዓ.ም => ዓ.ም` comes out
+as አ.ም when the merge is on, and `አርባ ምንጭ` (the city) is read as 40 ምንጭ when the numbers are on.
 
 Numbers (numbers_to_digits): 0-9, 10-99 (አስራ አንድ = 11, ሃያ አምስት = 25), hundreds, ሺህ, ሚሊዮን, ቢሊዮን, ትሪሊዮን
 (ሶስት ሺህ አምስት መቶ = 3500), ነጥብ decimals (ሁለት ነጥብ አምስት = 2.5; the digits after ነጥብ are read one by one).
 Spelling variants ሶስት/ሦስት, አስር/አሥር, ሃያ/ሀያ/ሐያ, ሚሊዮን/ሚሊየን are all accepted. A number ends where the grammar
-ends, so neighbours stay separate: አንድ ሁለት = "1 2", ሃያ አስር = "20 10". A bare አስራ, a ነጥብ that is not
+ends, so neighbours stay separate: አንድ ሁለት = "1 2", ሃያ አስር = "20 10". Any 1-99 value directly before መቶ is
+that many hundreds, which is how years are spoken: አስራ ዘጠኝ መቶ ሰማንያ አምስት = 1985, ሃያ አምስት መቶ = 2500; such a
+year after ሺህ or ሚሊዮን starts a new number (ሁለት ሺህ አስራ ዘጠኝ መቶ = "2000 1900"). A bare አስራ, a ነጥብ that is not
 between a number and digit words, and ordinals (ሁለተኛ) are left alone. The prepositions በ ለ ከ የ stay attached,
 as Amharic writes them (በሶስት ሰዓት = በ3 ሰዓት); በመቶ ("percent") is never read as በ + 100.
-Known limit: አንድ is also the indefinite article, so "አንድ ቀን" becomes "1 ቀን"; leave the flag off if that hurts.
+Known limits, all words that are also numbers: አንድ is the indefinite article ("አንድ ቀን" becomes "1 ቀን"), አንድ ላይ
+("together") becomes "1 ላይ", አርባ ምንጭ (the city) becomes "40 ምንጭ", የመቶ አለቃ (a rank) becomes "የ100 አለቃ", and
+the old-style percent ከመቶ ሃምሳ becomes "ከ150". Leave the flag off if that hurts.
 
 Punctuation (EXPERIMENTAL, rule-based, tuned to produce few wrong marks rather than many right ones):
   1. Text with no Ethiopic letter (digits, English only) is left alone.
@@ -25,7 +31,11 @@ Punctuation (EXPERIMENTAL, rule-based, tuned to produce few wrong marks rather t
      የትም, መቼም ("nothing", "anyone", "anywhere", "never") are different words and do not count.
   5. Reported questions are statements: a sentence with a quotative (ብሎ ብዬ ...) or እንደሆነ/አላውቅም is not marked ?.
   6. The yes/no suffix -ን is deliberately not used: it also ends accusatives and every 1st person plural verb.
-  7. A comma ፣ goes before the clause openers ነገር ግን, ሆኖም and ምክንያቱም when a word precedes them.
+  7. A comma ፣ goes before the clause openers ነገር ግን, ሆኖም and ምክንያቱም when a word precedes them, unless that
+     word is a demonstrative (ይህ ነገር ግን ጥሩ ነው: "this thing, however", no comma after ይህ).
+  8. ምን አልባት (ምናልባት, "perhaps", split in two) is not a question word.
+Known wrong marks: an exclamation built on an interrogative (እንዴት ደስ ይላል, "how nice") gets ? instead of ።, and a
+question without any interrogative word or ወይ/አይደል (መጣህን, ዛሬ ትመጣለህ) gets ።. Fix by hand or turn the flag off.
 """
 import re
 
@@ -87,24 +97,32 @@ _PREFIXES = "በለከየ"
 _EDGE = re.compile(r"(\W*)(\w+)(\W*)")  # punctuation, word, punctuation
 
 
+def _upto99(r: list[tuple[str, int]], k: int) -> tuple[int, int] | None:
+    """Value 1-99 at r[k:] -> (value, next k). r carries two padding tokens so the look-ahead stays in range."""
+    kind, value = r[k]
+    if kind == "tens":
+        return (value + r[k + 1][1], k + 2) if r[k + 1][0] == "u" else (value, k + 1)
+    if kind == "teen":
+        return (10 + r[k + 1][1], k + 2) if r[k + 1][0] == "u" else None
+    return (value, k + 1) if kind in ("u", "ten") else None
+
+
 def _small(run: list[tuple[str, int]], k: int) -> tuple[int, int] | None:
-    """Value below 1000 at run[k:] -> (value, next k). A unit followed by መቶ always belongs to that hundred."""
-    r, start, total = [*run, ("", 0), ("", 0)], k, 0  # padding keeps the look-ahead in range
-    if r[k][0] == "u" and r[k + 1][0] == "hun":
-        total, k = r[k][1] * 100, k + 2
+    """Value at run[k:] below 1000, or a multiple of a hundred (አስራ ዘጠኝ መቶ = 1900) -> (value, next k).
+
+    Any 1-99 value directly before መቶ belongs to that hundred; a 1-99 value after the hundreds must not be
+    followed by መቶ, which would make it the start of the next number.
+    """
+    r = [*run, ("", 0), ("", 0)]
+    head = _upto99(r, k)
+    if head and r[head[1]][0] == "hun":
+        total, j = head[0] * 100, head[1] + 1
     elif r[k][0] == "hun":
-        total, k = 100, k + 1
-    if r[k][0] == "tens":
-        total, k = total + r[k][1], k + 1
-        if r[k][0] == "u" and r[k + 1][0] != "hun":
-            total, k = total + r[k][1], k + 1
-    elif r[k][0] == "ten":
-        total, k = total + 10, k + 1
-    elif r[k][0] == "teen" and r[k + 1][0] == "u":
-        total, k = total + 10 + r[k + 1][1], k + 2
-    elif r[k][0] == "u" and r[k + 1][0] != "hun":
-        total, k = total + r[k][1], k + 1
-    return (total, k) if k > start else None
+        total, j = 100, k + 1
+    else:
+        return head
+    tail = _upto99(r, j)
+    return (total + tail[0], tail[1]) if tail and r[tail[1]][0] != "hun" else (total, j)
 
 
 def _integer(run: list[tuple[str, int]]) -> tuple[int, int] | None:
@@ -121,7 +139,7 @@ def _integer(run: list[tuple[str, int]]) -> tuple[int, int] | None:
             total += (small[0] if small else 1) * run[j][1]
             k, below = j + 1, run[j][1]
             continue
-        if small:
+        if small and (small[0] < 1000 or not k):  # a year-style 1900 after ሺህ is its own number
             total, k = total + small[0], j
         return (total, k) if k else None
 
@@ -190,7 +208,9 @@ _FINAL_PARTICLES = frozenset({"ወይ", "አይደል"})
 _REPORTED = frozenset({"ብሎ", "ብላ", "ብለው", "ብዬ", "ብለህ", "ብለሽ", "ብለን", "እንደሆነ", "አላውቅም"})
 _ETHIOPIC_LETTER = re.compile("[ሀ-ፚ]")  # U+1200-U+135A, the syllables
 _SENTENCE_END = re.compile(r"[።?!፧…]")
-_CLAUSE_OPENER = re.compile(r"(?<=\w) (?=(?:ነገር ግን|ሆኖም|ምክንያቱም)(?!\w))")
+# the look-behinds skip a demonstrative that merely precedes the noun ነገር
+_CLAUSE_OPENER = re.compile(r"(?<=\w)(?<!\bይህ)(?<!\bያ)(?<!\bይሄ)(?<!\bይኸ) (?=(?:ነገር ግን|ሆኖም|ምክንያቱም)(?!\w))")
+_MAYBE = re.compile(r"(?<!\w)ምን አልባት(?!\w)")
 
 
 def _is_wh(word: str) -> bool:
@@ -198,7 +218,7 @@ def _is_wh(word: str) -> bool:
 
 
 def _is_question(sentence: str) -> bool:
-    words = re.findall(r"\w+", sentence)
+    words = re.findall(r"\w+", _MAYBE.sub(" ", sentence))
     if not words or _REPORTED.intersection(words):
         return False
     return words[-1] in _FINAL_PARTICLES or any(_is_wh(w) for w in words)
