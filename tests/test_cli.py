@@ -90,7 +90,7 @@ def test_unsupported_platform(monkeypatch):
 
 
 def test_unknown_hotkey_name_is_friendly(tmp_path):
-    pytest.importorskip("pynput.keyboard")  # needs a display on Linux
+    pytest.importorskip("pynput.keyboard", exc_type=ImportError)  # needs a display on Linux
     path = tmp_path / "config.toml"
     path.write_text('dictate_key = "option_r"\n')
     assert "option_r" in exit_message(["--config", str(path), "--plain"])
