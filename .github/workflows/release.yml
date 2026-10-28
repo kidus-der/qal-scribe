@@ -1,0 +1,61 @@
+name: Release
+# Push a tag like v1.0.0 (its number must match `version` in pyproject.toml) to test, build, publish to PyPI
+# with trusted publishing (no API token) and attach the files to a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Tag matches the package version
+        run: test "v$(uv version --short)" = "$GITHUB_REF_NAME"
+      - run: uv build
+      - name: Smoke-test the wheel
+        run: |
+          # --version needs none of torch; the CPU build keeps the install small
+          export UV_TORCH_BACKEND=cpu
+          test "$(uvx --from dist/*.whl qal-scribe --version)" = "qal-scribe ${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/qal-scribe/
+    permissions:
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
