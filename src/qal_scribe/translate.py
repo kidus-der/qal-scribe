@@ -9,7 +9,9 @@ import re
 
 SRC_LANG = "amh_Ethi"
 TGT_LANG = "eng_Latn"
-MAX_WORDS = 40  # NLLB is trained on sentences; longer unpunctuated runs (raw ASR output) degrade or truncate
+# NLLB is trained on sentences; longer unpunctuated runs (raw ASR output) degrade or truncate.
+# shortcut: cuts at a word count, possibly mid-sentence; upgrade when the punctuation step is on by default.
+MAX_WORDS = 40
 # Ethiopic full stop and question mark end a sentence even without a following space.
 _SENTENCE_END = re.compile(r"(?<=[።፧])\s*|(?<=[.!?])\s+")
 
