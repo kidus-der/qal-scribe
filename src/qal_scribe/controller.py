@@ -13,7 +13,7 @@ import numpy as np
 from qal_scribe import config as config_mod
 from qal_scribe import events as ev
 from qal_scribe import models, paste, postprocess
-from qal_scribe.audio import SAMPLE_RATE, Recorder
+from qal_scribe.audio import SAMPLE_RATE, Recorder, play_cue
 from qal_scribe.engine import Engine
 from qal_scribe.hotkey import PushToTalk, key_label
 
@@ -70,10 +70,14 @@ class Controller:
 
     def _start_recording(self, mode: ev.Mode) -> None:
         self.recorder.start()
+        if self.cfg.sounds:
+            play_cue("start")
         self.emit(ev.RecordingStarted(mode))
 
     def _stop_recording(self, mode: ev.Mode) -> None:
         audio = self.recorder.stop()
+        if self.cfg.sounds:
+            play_cue("stop")
         self.emit(ev.RecordingStopped(mode, len(audio) / SAMPLE_RATE))
         self._clips.put((mode, audio))
 

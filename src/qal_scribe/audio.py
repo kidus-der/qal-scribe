@@ -34,3 +34,7 @@ class Recorder:
     def stop(self) -> np.ndarray:
         self._stream.stop()
         return np.concatenate(self._chunks) if self._chunks else np.zeros(0, dtype="float32")
+
+
+def play_cue(kind: str) -> None:
+    """Short sound when recording starts/stops ("start" | "stop" | "error"). Must not block. Workstream `platform`."""
