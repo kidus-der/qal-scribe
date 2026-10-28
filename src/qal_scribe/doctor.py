@@ -45,6 +45,8 @@ def config_problem(cfg: Config) -> str | None:
         models.get(cfg.language)
     except ValueError as e:
         return str(e)
+    if cfg.restore_delay < 0:
+        return f"restore_delay is {cfg.restore_delay}: it cannot be negative"
     if cfg.translate_key and cfg.translate_key == cfg.dictate_key:
         return f"dictate_key and translate_key are both {cfg.dictate_key!r}"
     try:
@@ -73,8 +75,8 @@ def check_config(path: Path) -> tuple[Check, Config]:
         problem = config_problem(cfg)
     except (ValueError, OSError) as e:
         cfg, problem = Config(), str(e)
-    if problem:
-        return Check("Config", "fail", problem, "edit it (`qal-scribe config` shows where it is)"), cfg
+    if problem:  # the other checks cannot run on a config like this (unknown language, ...)
+        return Check("Config", "fail", problem, "edit it (`qal-scribe config` shows where it is)"), Config()
     return Check("Config", "ok", str(path) if path.exists() else "no file, using defaults"), cfg
 
 

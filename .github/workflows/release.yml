@@ -1,6 +1,7 @@
 name: Release
 # Push a tag like v1.0.0 (its number must match `version` in pyproject.toml) to test, build, publish to PyPI
 # with trusted publishing (no API token) and attach the files to a GitHub release.
+# PyPI publisher settings: owner kidus-der, repository qal-scribe, workflow release.yml, environment pypi.
 on:
   push:
     tags: ["v*"]

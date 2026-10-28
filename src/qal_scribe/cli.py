@@ -159,6 +159,22 @@ def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
     print(text)
 
 
+def fetch_missing_models(cfg: Config) -> None:
+    """Download the weights before the UI starts: a failure inside the TUI's worker thread cannot reach
+    friendly_download_errors(), and the hub's progress bars only look right in a plain terminal."""
+    from qal_scribe import models
+    from qal_scribe.doctor import WEIGHT_FILES, is_cached
+
+    spec = spec_for(cfg.language)
+    has_weights = is_cached(spec.repo, spec.revision, *WEIGHT_FILES)
+    has_lm = not (cfg.lm and spec.lm_file) or is_cached(spec.repo, spec.revision, spec.lm_file)
+    if has_weights and has_lm:
+        return
+    with friendly_download_errors():
+        print(f"First run: fetching {spec.language_name} model {spec.repo} ({spec.license}), about 3 GB...", flush=True)
+        models.download(spec, with_lm=cfg.lm)
+
+
 def cmd_run(cfg: Config, plain: bool) -> None:
     if not sys.platform.startswith(("darwin", "linux")):
         fail(f"{sys.platform} is not supported (macOS and Linux only)")
@@ -166,6 +182,7 @@ def cmd_run(cfg: Config, plain: bool) -> None:
 
     if problem := config_problem(cfg):
         fail(f"bad config: {problem}\nSee `qal-scribe config` for its location and `qal-scribe doctor` to check it.")
+    fetch_missing_models(cfg)
     if plain:
         from qal_scribe.plain import run
     else:

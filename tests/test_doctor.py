@@ -1,3 +1,4 @@
+import re
 import sys
 
 import pytest
@@ -7,21 +8,6 @@ from qal_scribe.config import Config
 from qal_scribe.doctor import Check
 
 SPEC = models.MODELS["amh"]
-
-
-@pytest.fixture
-def hf_cache(tmp_path, monkeypatch):
-    """An empty Hugging Face cache; `put` adds a file of a pinned revision to it."""
-    from huggingface_hub import constants
-
-    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "hub"))
-
-    def put(repo: str, revision: str, filename: str) -> None:
-        f = tmp_path / "hub" / f"models--{repo.replace('/', '--')}" / "snapshots" / revision / filename
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_bytes(b"x")
-
-    return put
 
 
 def status(checks, name):
@@ -59,12 +45,20 @@ def test_check_config(tmp_path):
     check, cfg = doctor.check_config(bad)
     assert check.status == "fail" and "nonsense" in check.detail and cfg == Config()
     bad.write_text('language = "xx"\n')
-    assert "no model for language" in doctor.check_config(bad)[0].detail
+    check, cfg = doctor.check_config(bad)
+    assert "no model for language" in check.detail and cfg == Config()  # the other checks must not see "xx"
+    bad.write_text('restore_delay = "0.5"\n')
+    check, cfg = doctor.check_config(bad)
+    assert check.status == "fail" and "restore_delay must be a number" in check.detail and cfg == Config()
 
 
 def test_config_problem_same_key_twice():
     assert "both" in doctor.config_problem(Config(dictate_key="alt_r", translate_key="alt_r"))
     assert doctor.config_problem(Config(translate_key="")) is None
+
+
+def test_config_problem_negative_restore_delay():
+    assert "negative" in doctor.config_problem(Config(restore_delay=-1))
 
 
 def test_microphone(monkeypatch):
@@ -135,3 +129,11 @@ def test_exit_code_is_1_only_when_dictation_is_blocked(monkeypatch, tmp_path, hf
     assert run_with(monkeypatch, tmp_path, check_microphone=Check("Microphone", "fail", "none", "plug one in")) == 1
     out = capsys.readouterr().out
     assert "Dictation is blocked" in out and "plug one in" in out
+
+
+@pytest.mark.parametrize("text", ['language = "xx"', 'language = "am"', 'restore_delay = "fast"', "words_file = 5"])
+def test_bad_config_renders_the_table_instead_of_crashing(monkeypatch, tmp_path, hf_cache, capsys, text):
+    (tmp_path / "config.toml").write_text(text + "\n")
+    assert run_with(monkeypatch, tmp_path) == 1
+    out = capsys.readouterr().out
+    assert re.search(r"Config\s+│\s+FAIL", out) and "Dictation is blocked" in out
