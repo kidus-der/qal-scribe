@@ -55,7 +55,7 @@ class Controller:
         ok, reason = paste.can_paste()
         if not ok:
             self.emit(ev.Notice(reason, "warning"))
-        self.recorder = Recorder(on_level=self._level)
+        self.recorder = Recorder(on_level=self._level, device=self.cfg.mic)
         self.hotkeys = PushToTalk(self.keys(), self._start_recording, self._stop_recording)
         self.hotkeys.start()
         if self.hotkeys.reason:
