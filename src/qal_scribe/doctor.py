@@ -113,6 +113,8 @@ def check_microphone(mic: str | None = None) -> Check:
         import sounddevice as sd
     except OSError:  # PortAudio shared library missing
         return Check("Microphone", "fail", "PortAudio library not found", "Linux: sudo apt install libportaudio2")
+    except Exception as e:  # noqa: BLE001 - importing starts PortAudio, which raises PortAudioError with no audio server
+        return Check("Microphone", "fail", f"audio system unavailable: {e}", "start PipeWire/PulseAudio or check audio drivers")
     device = int(mic) if mic and mic.isdigit() else mic
     try:
         return Check("Microphone", "ok", sd.query_devices(device, kind="input")["name"])

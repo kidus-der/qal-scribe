@@ -89,8 +89,30 @@ def test_config_problem_unreadable_words_file(tmp_path):
     assert str(tmp_path) in doctor.config_problem(Config(words_file=tmp_path))
 
 
+def sounddevice_or_skip():
+    try:
+        import sounddevice
+    except Exception as e:  # noqa: BLE001 - import raises PortAudioError where there is no audio server (CI)
+        pytest.skip(f"sounddevice unavailable: {e}")
+    return sounddevice
+
+
+def test_microphone_without_audio_server(monkeypatch):
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "sounddevice":
+            raise RuntimeError("PulseAudio_Initialize: Can't connect to server")  # stands in for PortAudioError
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    mic = doctor.check_microphone()
+    assert mic.status == "fail" and "audio system unavailable" in mic.detail
+
+
 def test_microphone(monkeypatch):
-    sd = pytest.importorskip("sounddevice")
+    sd = sounddevice_or_skip()
     monkeypatch.setattr(sd, "query_devices", lambda device=None, kind=None: {"name": "Fake mic"})
     assert doctor.check_microphone().detail == "Fake mic"
 
@@ -103,7 +125,7 @@ def test_microphone(monkeypatch):
 
 
 def test_configured_microphone_is_resolved_like_the_recorder_does(monkeypatch):
-    sd = pytest.importorskip("sounddevice")
+    sd = sounddevice_or_skip()
     devices = [{"name": "MacBook Pro Microphone", "max_input_channels": 1},
                {"name": "MacBook Pro Speakers", "max_input_channels": 0},
                {"name": "USB Mic", "max_input_channels": 2}]
