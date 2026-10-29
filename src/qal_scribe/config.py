@@ -1,4 +1,8 @@
-"""User config from ~/.config/qal-scribe/config.toml (or $XDG_CONFIG_HOME). Missing file -> defaults."""
+"""User config from ~/.config/qal-scribe/config.toml (or $XDG_CONFIG_HOME). Missing file -> defaults.
+
+Contract: load(path=None) -> Config (ValueError for unknown keys or wrong types); load_words(cfg) -> the words.txt
+replacements, {heard: wanted}.
+"""
 import os
 import tomllib
 from dataclasses import dataclass, field, fields
@@ -42,6 +46,20 @@ def check_types(data: dict, path: Path) -> None:
         what, types = KINDS.get(f.type, ("text in quotes", str))
         if not isinstance(value, types) or (f.type is not bool and isinstance(value, bool)):
             raise ValueError(f"{path}: {f.name} must be {what}, got {value!r}")
+
+
+def load_words(cfg: Config) -> dict[str, str]:
+    """words.txt lines: `heard => wanted` replacements; blank lines and # comments ignored."""
+    if not cfg.words_file.exists():
+        return {}
+    pairs = {}
+    for line in cfg.words_file.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if "=>" in line:
+            heard, wanted = (s.strip() for s in line.split("=>", 1))
+            if heard:
+                pairs[heard] = wanted
+    return pairs
 
 
 def load(path: Path | None = None) -> Config:

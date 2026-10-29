@@ -2,7 +2,8 @@
 
 Contract: Recorder(on_level, device=None).start(); audio = recorder.stop() -> float32 numpy array (may be empty).
 recorder.snapshot() -> the same array so far, while still recording.
-device is a name (substring match), an index, or None for the system default (cfg.mic).
+device is a name (substring match), an index, or None for the system default (cfg.mic); ValueError when it cannot
+be opened (no match, out of range, output-only).
 on_level(rms) is called from the audio thread for each block; keep it cheap.
 play_cue(kind) never blocks, never raises, and does nothing when there is no output device.
 """
@@ -28,8 +29,12 @@ class Recorder:
             device = int(device)  # a config file can only say "2"
         self._chunks: list[np.ndarray] = []
         self._on_level = on_level
-        self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", device=device,
-                                      callback=self._callback)
+        try:
+            self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", device=device,
+                                          callback=self._callback)
+        except sd.PortAudioError as e:  # a number out of range or an output-only device; numbers shift with USB/BT
+            which = "the default microphone" if device is None else f"microphone {device!r}"
+            raise ValueError(f"cannot open {which}: {e}; `qal-scribe doctor` lists the inputs") from e
 
     def _callback(self, data, frames, time_info, status) -> None:
         self._chunks.append(data[:, 0].copy())

@@ -13,7 +13,7 @@ from textual.widgets import ListItem, Static
 
 from qal_scribe import events as ev
 
-STATES = ("loading", "ready", "recording", "transcribing", "translating", "failed")
+STATES = ("loading", "ready", "recording", "transcribing", "translating", "failed", "quitting")
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 BLOCKS = " ▁▂▃▄▅▆▇█"
 MODE_NAMES = {"dictate": "Dictate", "translate": "Translate → English"}
@@ -83,10 +83,12 @@ class TopBar(Horizontal):
     def compose(self) -> ComposeResult:
         yield Static(Content.assemble(("ቃል", "bold $accent"), (" qal-scribe", "bold")), id="brand")
         yield Static("", id="status")
+        yield Static("", id="mic", markup=False)
         yield Static("", id="pill")
 
-    def set_status(self, text: Content) -> None:
+    def set_status(self, text: Content, mic: str = "") -> None:
         self.query_one("#status", Static).update(text)
+        self.query_one("#mic", Static).update(mic)
 
     def set_pill(self, label: str) -> None:
         self.query_one("#pill", Static).update(label)
@@ -112,12 +114,15 @@ class Stage(Vertical):
         self.query_one("#hero").display = True
         self.query_one("#transcript").display = False
 
-    def show_transcript(self, text: str, live: bool = False) -> None:
+    def show_transcript(self, text: str, live: bool = False, empty: bool = False) -> None:
         self.set_class(live, "-live")
+        self.set_class(empty, "-empty")
         self.query_one("#transcript", Static).update(text)
         self.query_one("#hero-title").display = False
         self.query_one("#hero").display = False
         self.query_one("#transcript").display = True
+        if live:  # a long draft grows downwards: keep its newest words in view (force: compact hides overflow)
+            self.query_one("#reading").scroll_end(animate=False, immediate=True, force=True)
 
 
 class HistoryRow(ListItem):

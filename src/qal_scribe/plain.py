@@ -14,9 +14,13 @@ def format_event(e: ev.Event) -> str | None:
         case ev.Ready(device, model, _, lm, hotkeys):
             keys = ", ".join(f"hold {k} to {m}" for k, m in hotkeys.items())
             return f"ready on {device} ({model}{', LM on' if lm else ''}): {keys}. Ctrl+C to quit"
+        case ev.RecordingStarted(mode):  # with sounds off or `toggle`, the only sign the press was heard
+            return f"● recording ({mode})"
+        case ev.RecordingStopped(mode, seconds):
+            return f"… {seconds:.1f}s recorded, {'translating' if mode == 'translate' else 'transcribing'}"
         case ev.Transcribed(mode, text, _, audio_s, compute_s, pasted):
-            tail = "" if pasted else " (not pasted)"
-            return f"[{mode} {audio_s:.1f}s audio, {compute_s:.2f}s] {text}{tail}"
+            tail = "" if pasted or not text else " (not pasted)"
+            return f"[{mode} {audio_s:.1f}s audio, {compute_s:.2f}s] {text or '(nothing recognised)'}{tail}"
         case ev.Notice(message, level):
             return f"{level}: {message}"
     return None

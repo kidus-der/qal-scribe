@@ -14,6 +14,7 @@ from qal_scribe import config as config_mod
 from qal_scribe import events as ev
 from qal_scribe import ipc, models, paste, postprocess
 from qal_scribe.audio import SAMPLE_RATE, Recorder, play_cue
+from qal_scribe.config import load_words
 from qal_scribe.engine import Engine
 from qal_scribe.hotkey import PushToTalk, key_label
 
@@ -21,20 +22,6 @@ LEVEL_INTERVAL = 1 / 25  # throttle mic-level events to ~25/s
 PREVIEW_INTERVAL = 0.6  # pause between live previews while recording
 STOP_WAIT = 5.0  # seconds stop() waits for a running model call before giving up on unloading
 PREVIEW_MAX_SECONDS = 1.5  # slower previews (CPU) would hold up the final result: stop previewing then
-
-
-def load_words(cfg: config_mod.Config) -> dict[str, str]:
-    """words.txt lines: `heard => wanted` replacements; blank lines and # comments ignored."""
-    if not cfg.words_file.exists():
-        return {}
-    pairs = {}
-    for line in cfg.words_file.read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if "=>" in line:
-            heard, wanted = (s.strip() for s in line.split("=>", 1))
-            if heard:
-                pairs[heard] = wanted
-    return pairs
 
 
 class Controller:
@@ -53,6 +40,8 @@ class Controller:
         self._gpu = threading.Lock()
         self._switching = threading.Lock()
         self._preview_lock = threading.Lock()  # makes "stop previewing" and "emit a Partial" mutually exclusive
+        self._rec_lock = threading.Lock()  # the hotkey thread and `qal-scribe toggle` (IPC thread) both start/stop
+        self._paste_lock = threading.Lock()  # held while a paste is in flight, so stop() can let it restore
         self._preview_stop = threading.Event()
         self._stopped = threading.Event()
 
@@ -94,6 +83,8 @@ class Controller:
             self.recorder.stop()
         self._clips.put(None)  # wakes the worker so it exits
         self.translator = None
+        if self._paste_lock.acquire(timeout=self.cfg.restore_delay + 1):  # a paste in flight restores the clipboard
+            self._paste_lock.release()
         if self._gpu.acquire(timeout=STOP_WAIT):
             try:
                 self.engine.unload()
@@ -121,6 +112,7 @@ class Controller:
             self.emit(self._ready())
         except Exception as e:  # noqa: BLE001 - the old model stays active; report instead of dying in a thread
             self.emit(ev.Notice(f"could not switch to {spec.language_name}: {type(e).__name__}: {e}", "error"))
+            self.emit(self._ready())  # the old model still serves: the UI must leave its loading state
         finally:
             self._switching.release()
 
@@ -131,14 +123,23 @@ class Controller:
             self.emit(ev.Level(min(1.0, rms * 4)))
 
     def _start_recording(self, mode: ev.Mode) -> None:
-        self._mode = mode
-        self.recorder.start()
-        if self.cfg.sounds:
-            play_cue("start")
-        self.emit(ev.RecordingStarted(mode))
-        if self.cfg.preview:
-            self._preview_stop = stop = threading.Event()
-            threading.Thread(target=self._preview_loop, args=(stop,), daemon=True).start()
+        """Hotkey press or toggle. Never raises: on pynput's thread an exception silently kills the hotkeys."""
+        with self._rec_lock:
+            if self.recorder.active:  # e.g. a hotkey press while a `toggle` recording runs
+                return
+            try:
+                self.recorder.start()
+            except Exception as e:  # noqa: BLE001 - e.g. PortAudioError after the mic was unplugged
+                self.emit(ev.Notice(f"could not start recording: {type(e).__name__}: {e}; `qal-scribe doctor` "
+                                    "checks the microphone", "error"))
+                return
+            self._mode = mode
+            if self.cfg.sounds:
+                play_cue("start")
+            self.emit(ev.RecordingStarted(mode))
+            if self.cfg.preview:
+                self._preview_stop = stop = threading.Event()
+                threading.Thread(target=self._preview_loop, args=(stop,), daemon=True).start()
 
     def _stop_preview(self) -> None:
         with self._preview_lock:
@@ -172,13 +173,23 @@ class Controller:
             if result.compute_seconds > PREVIEW_MAX_SECONDS:
                 return
 
-    def _stop_recording(self, mode: ev.Mode) -> None:
-        self._stop_preview()
-        audio = self.recorder.stop()
-        if self.cfg.sounds:
-            play_cue("stop")
-        self.emit(ev.RecordingStopped(mode, len(audio) / SAMPLE_RATE))
-        self._clips.put((mode, audio))
+    def _stop_recording(self, *_) -> None:
+        """Hotkey release or toggle; keeps the mode the recording started with. Never raises (see above)."""
+        with self._rec_lock:
+            if not self.recorder.active:  # e.g. the key is released after `toggle` already stopped the recording
+                return
+            self._stop_preview()
+            mode = self._mode
+            try:
+                audio = self.recorder.stop()
+            except Exception as e:  # noqa: BLE001 - same as _start_recording
+                self.emit(ev.RecordingStopped(mode, 0.0))
+                self.emit(ev.Notice(f"could not stop recording: {type(e).__name__}: {e}", "error", clip=True))
+                return
+            if self.cfg.sounds:
+                play_cue("stop")
+            self.emit(ev.RecordingStopped(mode, len(audio) / SAMPLE_RATE))
+            self._clips.put((mode, audio))
 
     def toggle(self, mode: ev.Mode = "dictate") -> None:
         """External trigger (Linux/Wayland `qal-scribe toggle`): start if idle, stop if recording. A stop keeps
@@ -186,7 +197,7 @@ class Controller:
         if self.hotkeys is None:
             raise RuntimeError("still loading the model; try again in a moment")  # the client prints this
         if self.recorder.active:
-            self._stop_recording(self._mode)
+            self._stop_recording()
         else:
             self._start_recording(mode)
 
@@ -196,19 +207,22 @@ class Controller:
             try:
                 self.handle(mode, audio)
             except Exception as e:  # noqa: BLE001 - keep the tool alive; show the error instead of dying in a thread
-                self.emit(ev.Notice(f"{type(e).__name__}: {e}", "error"))
+                self.emit(ev.Notice(f"{type(e).__name__}: {e}", "error", clip=True))
 
     def handle(self, mode: ev.Mode, audio: np.ndarray) -> None:
         if len(audio) < SAMPLE_RATE // 4 or np.abs(audio).max() < 1e-3:
             self.emit(ev.Notice("too short or silent; check the terminal's Microphone permission if this repeats",
-                                "warning"))
+                                "warning", clip=True))
             return
         with self._gpu:
             result = self.engine.transcribe(audio)
             text = postprocess.process(result.text, self.cfg, self.words)
             if mode == "translate" and text:
                 text = self.translate(text)
-        pasted = bool(text) and paste.paste(text + " ", self.cfg.restore_delay)
+        with self._paste_lock:
+            if self._stopped.is_set():  # quitting: the ⌘V would land in the terminal the user just quit
+                return
+            pasted = bool(text) and paste.paste(text + " ", self.cfg.restore_delay)
         self.emit(ev.Transcribed(mode, text, result.text, len(audio) / SAMPLE_RATE, result.compute_seconds, pasted))
 
     def translate(self, text: str) -> str:

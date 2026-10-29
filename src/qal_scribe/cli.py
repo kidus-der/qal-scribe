@@ -5,6 +5,7 @@ Errors a user can fix (bad config, no network for the model, unsupported platfor
 and exit code 1, never a traceback.
 """
 import argparse
+import logging
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,25 +14,33 @@ from typing import NoReturn
 from qal_scribe import __version__
 from qal_scribe.config import Config
 
+EPILOG = ("Run with no command to start dictating: hold Right Option to dictate Amharic, Right Control for "
+          "English text. The first run downloads the speech model (about 3 GB).")
+
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="qal-scribe", description="On-device push-to-talk dictation for Amharic.")
+    p = argparse.ArgumentParser(prog="qal-scribe", description="On-device push-to-talk dictation for Amharic.",
+                                epilog=EPILOG)
     p.add_argument("--version", action="version", version=f"qal-scribe {__version__}")
     p.add_argument("--plain", action="store_true", help="line output instead of the TUI")
     p.add_argument("--config", help="path to config.toml")
     sub = p.add_subparsers(dest="command")
-    sub.add_parser("doctor", help="check permissions, microphone, device and models")
-    m = sub.add_parser("models", help="list available languages and models")
-    d = m.add_subparsers(dest="models_command").add_parser("download", help="fetch model weights now (then it works offline)")
+
+    def command(parent, name: str, text: str) -> argparse.ArgumentParser:
+        return parent.add_parser(name, help=text, description=text)
+
+    command(sub, "doctor", "check permissions, microphone, device and models")
+    m = command(sub, "models", "list available languages and models")
+    d = command(m.add_subparsers(dest="models_command"), "download", "fetch model weights now (then it works offline)")
     d.add_argument("language", nargs="?", help="language code (default: the one in your config)")
     d.add_argument("--translation", action="store_true", help="also fetch the Amharic -> English model (2.5 GB)")
-    c = sub.add_parser("config", help="show the config file path")
+    c = command(sub, "config", "show the config file path")
     c.add_argument("--init", action="store_true", help="write a fully commented default config (never overwrites)")
-    t = sub.add_parser("transcribe", help="transcribe a 16 kHz mono wav file and print the text")
-    t.add_argument("file")
+    t = command(sub, "transcribe", "transcribe an audio file and print the text")
+    t.add_argument("file", help="wav, flac, ogg or mp3; any sample rate, mono or stereo")
     t.add_argument("--translate", action="store_true", help="translate to English")
-    sub.add_parser("about", help="licences and model attribution")
-    tg = sub.add_parser("toggle", help="start/stop recording in the running instance (for Wayland key bindings)")
+    command(sub, "about", "licences and model attribution")
+    tg = command(sub, "toggle", "start/stop recording in the running instance (for Wayland key bindings)")
     tg.add_argument("--translate", action="store_true", help="translate to English")
     return p
 
@@ -50,10 +59,12 @@ def friendly_download_errors():
         OfflineModeIsEnabled,
     )
 
+    # Offline, the hub retries for 23 s, logging each retry; the one-line failure below says all of it.
+    logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
     try:
         yield
     except (HfHubHTTPError, HTTPError, LocalEntryNotFoundError, OfflineModeIsEnabled) as e:
-        reason = str(e).splitlines()[0] if str(e) else type(e).__name__
+        reason = str(e).splitlines()[0].removeprefix("Got: ") if str(e) else type(e).__name__
         fail(f"could not get the model files from Hugging Face:\n  {reason}\nConnect to the internet and run "
              "`qal-scribe models download`; once downloaded, qal-scribe works offline.")
 
@@ -108,10 +119,20 @@ def cmd_models(args: argparse.Namespace) -> None:
     from qal_scribe.doctor import WEIGHT_FILES, is_cached
 
     if args.models_command != "download":
-        for spec in models.MODELS.values():
-            flag = " (experimental)" if spec.experimental else ""
-            state = "cached" if is_cached(spec.repo, spec.revision, *WEIGHT_FILES) else "not downloaded"
-            print(f"{spec.language}  {spec.language_name:<10} {spec.repo}  {spec.license}{flag}  [{state}]")
+        from qal_scribe.translate import Translator
+
+        def state(repo: str, revision: str) -> str:
+            return "cached" if is_cached(repo, revision, *WEIGHT_FILES) else "not downloaded"
+
+        rows = [("code", "language", "model", "licence", "state")]
+        rows += [(s.language, s.language_name, s.repo, s.license + (" (experimental)" if s.experimental else ""),
+                  state(s.repo, s.revision)) for s in models.MODELS.values()]
+        rows.append(("", "translation", Translator.MODEL, "CC-BY-NC-4.0 (Amharic -> English)",
+                     state(Translator.MODEL, Translator.REVISION)))
+        widths = [max(len(row[i]) for row in rows) for i in range(4)]
+        for row in rows:
+            print("  ".join(cell.ljust(width) for cell, width in zip(row, widths)), row[4], sep="  ")
+        print("\ndownload one with: qal-scribe models download LANG [--translation]")
         return
     cfg = load_config(config_path(args.config), explicit=bool(args.config))
     spec = spec_for(args.language or cfg.language)
@@ -119,13 +140,10 @@ def cmd_models(args: argparse.Namespace) -> None:
         print(f"Fetching {spec.language_name} model {spec.repo} ({spec.license})...", flush=True)
         print(f"-> {models.download(spec, with_lm=cfg.lm)}")
         if args.translation:
-            from huggingface_hub import snapshot_download
-
             from qal_scribe.translate import Translator
 
             print(f"Fetching translation model {Translator.MODEL} (CC-BY-NC-4.0, non-commercial)...", flush=True)
-            patterns = ["*.json", "*.bin", "*.model"]  # same files Translator.load() asks for
-            print(f"-> {snapshot_download(Translator.MODEL, revision=Translator.REVISION, allow_patterns=patterns)}")
+            print(f"-> {download_translation()}")
 
 
 def cmd_about() -> None:
@@ -135,22 +153,48 @@ def cmd_about() -> None:
     print(files("qal_scribe").joinpath("NOTICE").read_text(encoding="utf-8"))
 
 
+def download_translation() -> str:
+    from huggingface_hub import snapshot_download
+
+    from qal_scribe.translate import Translator
+
+    patterns = ["*.json", "*.bin", "*.model"]  # same files Translator.load() asks for
+    return snapshot_download(Translator.MODEL, revision=Translator.REVISION, allow_patterns=patterns)
+
+
+def resample(audio, rate: int, to: int):
+    """Band-limited (FFT) resampling of a whole file: phones and QuickTime record at 44.1 or 48 kHz."""
+    import numpy as np
+
+    # shortcut: the whole file's spectrum in memory (~0.7 GB per hour at 48 kHz); chunk it if hour-long files matter
+
+    n = round(len(audio) * to / rate)
+    return (np.fft.irfft(np.fft.rfft(audio), n) * (n / len(audio))).astype("float32")
+
+
 def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
+    if not Path(file).is_file():
+        fail(f"no such file: {file}")
     import soundfile as sf
 
     from qal_scribe import postprocess
+    from qal_scribe.config import load_words
     from qal_scribe.engine import SAMPLE_RATE, Engine
 
     try:
         audio, sr = sf.read(file, dtype="float32")
     except sf.SoundFileError as e:
-        fail(f"cannot read {file}: {e}")
-    if sr != SAMPLE_RATE or audio.ndim != 1:
-        fail(f"need {SAMPLE_RATE} Hz mono audio, got {sr} Hz with {audio.ndim} channel(s)")
+        fail(f"cannot read {file}: {e}\nConvert it with: ffmpeg -i {file} -ar 16000 -ac 1 out.wav")
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1)  # stereo -> mono
+    if sr != SAMPLE_RATE and len(audio):
+        audio = resample(audio, sr, SAMPLE_RATE)
+    fetch_missing_models(cfg, translation=translate)
+    quiet_progress_bars()
     with friendly_download_errors():
         engine = Engine(spec_for(cfg.language), device=cfg.device, use_lm=cfg.lm)
         engine.load()
-        text = postprocess.process(engine.transcribe(audio).text, cfg)
+        text = postprocess.process(engine.transcribe(audio).text, cfg, load_words(cfg))
         if translate:
             from qal_scribe.translate import Translator
 
@@ -160,20 +204,34 @@ def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
     print(text)
 
 
-def fetch_missing_models(cfg: Config) -> None:
+def fetch_missing_models(cfg: Config, translation: bool = False) -> None:
     """Download the weights before the UI starts: a failure inside the TUI's worker thread cannot reach
-    friendly_download_errors(), and the hub's progress bars only look right in a plain terminal."""
+    friendly_download_errors(), and the hub's progress bars only look right in a plain terminal.
+    Says so on stderr, which keeps `transcribe`'s stdout to the text alone."""
     from qal_scribe import models
     from qal_scribe.doctor import WEIGHT_FILES, is_cached
+    from qal_scribe.translate import Translator
 
     spec = spec_for(cfg.language)
     has_weights = is_cached(spec.repo, spec.revision, *WEIGHT_FILES)
     has_lm = not (cfg.lm and spec.lm_file) or is_cached(spec.repo, spec.revision, spec.lm_file)
-    if has_weights and has_lm:
-        return
     with friendly_download_errors():
-        print(f"First run: fetching {spec.language_name} model {spec.repo} ({spec.license}), about 3 GB...", flush=True)
-        models.download(spec, with_lm=cfg.lm)
+        if not (has_weights and has_lm):
+            print(f"First run: fetching {spec.language_name} model {spec.repo} ({spec.license}), about 3 GB...",
+                  file=sys.stderr, flush=True)
+            models.download(spec, with_lm=cfg.lm)
+        if translation and not is_cached(Translator.MODEL, Translator.REVISION, *WEIGHT_FILES):
+            print(f"First translation: fetching {Translator.MODEL} (CC-BY-NC-4.0), about 2.5 GB...",
+                  file=sys.stderr, flush=True)
+            download_translation()
+
+
+def quiet_progress_bars() -> None:
+    """Once the files are downloaded, the hub's "Fetching N files" and transformers' "Loading weights" bars are
+    noise, and garbage in a log. Call before transformers is imported: it copies this setting then."""
+    from huggingface_hub.utils import disable_progress_bars
+
+    disable_progress_bars()
 
 
 def cmd_run(cfg: Config, plain: bool) -> None:
@@ -186,6 +244,8 @@ def cmd_run(cfg: Config, plain: bool) -> None:
     fetch_missing_models(cfg)
     if plain:
         from qal_scribe.plain import run
+
+        quiet_progress_bars()
     else:
         from qal_scribe.app import run
     with friendly_download_errors():
@@ -195,6 +255,9 @@ def cmd_run(cfg: Config, plain: bool) -> None:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     path = config_path(args.config)
+    # transformers' wav2vec2-bert module imports torch.distributed.elastic, which warns on macOS about a feature
+    # qal-scribe never uses.
+    logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLevel(logging.ERROR)
     try:
         match args.command:
             case "config":
@@ -206,6 +269,8 @@ def main(argv: list[str] | None = None) -> None:
             case "doctor":
                 from qal_scribe.doctor import run
 
+                if args.config and not path.exists():  # the same check the other commands make
+                    fail(f"no config file at {path}")
                 sys.exit(run(path))
             case "toggle":
                 from qal_scribe.ipc import send_toggle

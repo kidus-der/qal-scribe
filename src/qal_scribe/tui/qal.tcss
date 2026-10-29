@@ -8,14 +8,21 @@ Screen {
 /* header */
 #top {
     height: 1;
-    padding: 0 2;
+    padding: 0 1;
 }
 #brand {
     width: auto;
 }
 #status {
+    width: auto;
+    padding: 0 0 0 2;
+    color: $text-muted;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+#mic {
     width: 1fr;
-    padding: 0 2;
+    padding: 0 2 0 0;
     color: $text-muted;
     text-wrap: nowrap;
     text-overflow: ellipsis;
@@ -24,9 +31,10 @@ Screen {
     width: auto;
     padding: 0 1;
     text-style: bold;
-    color: $background;
+    color: auto;  /* built-in themes (`t`): black or white, whichever reads on that state's colour */
     background: $primary;
 }
+App.-theme-qal #pill, App.-theme-qal-light #pill { color: $background; }
 
 /* stage */
 #stage {
@@ -64,8 +72,10 @@ Screen {
     color: $text;
 }
 
-#stage.-live #transcript {
-    text-style: italic;
+/* the live draft and "(nothing recognised)" are muted; Ethiopic fonts have no italic, terminals fake a slant */
+#stage.-live #transcript, #stage.-empty #transcript {
+    text-style: none;
+    color: $text-muted;
 }
 
 /* history */
@@ -96,11 +106,11 @@ HistoryRow {
     & > Static { height: auto; }
     & .time { width: 9; color: $text-muted; }
     & .mode { width: 9; color: $text-muted; }
-    & .text { width: 1fr; color: $text; }
+    & .text { width: 1fr; max-height: 2; color: $text; }  /* Enter copies the whole text */
     & .empty { color: $text-disabled; text-style: italic; }
     & .stats { width: auto; padding: 0 2; color: $text-muted; }
     & .paste { width: 1; }
-    & .ok { color: $accent; }
+    & .ok { color: $success; }  /* not $accent: many built-in themes use the same colour for accent and warning */
     & .no { color: $warning; }
     &.-highlight { background: $primary 20%; }
 }
@@ -124,7 +134,7 @@ Footer {
 }
 
 /* state colours */
-Screen.-loading #pill { background: $warning 70%; }
+Screen.-loading #pill { background: $warning; }
 Screen.-loading #stage { border: round $warning 50%; }
 Screen.-ready #pill { background: $primary; }
 Screen.-recording #pill { background: $error; }
@@ -135,9 +145,15 @@ Screen.-translating #pill { background: $secondary; }
 Screen.-translating #stage { border: round $secondary; }
 Screen.-failed #pill { background: $error; }
 Screen.-failed #stage { border: round $error; }
+Screen.-quitting #pill { background: $warning; }
+/* nothing to meter yet: give the rows to the loading message or the start error */
+Screen.-loading Meter, Screen.-failed Meter, Screen.-failed #hero-title { display: none; }
 
-/* narrow terminals: hotkey reminder moves out of the footer */
-Screen.-narrow #keys { display: none; }
+/* narrow terminals: hotkey reminder moves out of the footer; history text gets the stats' width (the stage
+   subtitle shows the latest stats) */
+Screen.-narrow #keys, Screen.-narrow HistoryRow .stats { display: none; }
+Screen.-narrow #mic { display: none; }  /* a cut-off "mic T…" helps nobody */
+Screen.-narrow #status { width: 1fr; padding: 0 2; }
 
 /* compact: a 3-5 line strip (header, meter, up to two text lines, footer) for a small always-visible window */
 Screen.-compact {
@@ -154,6 +170,7 @@ Screen.-compact {
     }
     & Meter { height: 1; }
     & #reading { overflow-y: hidden; align: left top; }
+    & Toast { padding: 0 1; }  /* a 2-row toast leaves the state pill visible */
     & #hero, & #transcript { text-align: left; padding: 0; }
     &.-tiny #bottom { display: none; }
 }

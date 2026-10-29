@@ -74,3 +74,16 @@ def test_recorder_passes_the_device(monkeypatch, device, expected):
     sd = fake_sounddevice(monkeypatch)
     audio.Recorder(device=device)
     assert sd.opened[0]["device"] == expected and sd.opened[0]["samplerate"] == audio.SAMPLE_RATE
+
+
+@pytest.mark.parametrize("device", ["99", None])
+def test_a_mic_that_cannot_be_opened_is_a_value_error(monkeypatch, device):
+    class PortAudioError(Exception):
+        pass
+
+    def refuse(**kw):
+        raise PortAudioError("Error querying device 99")
+
+    fake_sounddevice(monkeypatch, PortAudioError=PortAudioError).InputStream = refuse
+    with pytest.raises(ValueError, match="cannot open .*Error querying device 99.*qal-scribe doctor"):
+        audio.Recorder(device=device)

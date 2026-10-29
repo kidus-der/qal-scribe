@@ -55,7 +55,7 @@ Pasting goes through the clipboard: qal-scribe saves what you had copied and put
 While you speak, a live draft appears in the window (turn it off with `preview = false`).
 
 The terminal window shows the state (ready, recording, transcribing), a mic level meter and a history of what
-you said. Its keys: `c` copies the last text, `Enter` copies the selected history row, `l` switches language,
+you said. Its keys: `c` copies the last text, `Enter` copies the highlighted history row, `l` switches language,
 `t` changes the theme, `m` toggles a compact 3-5 line layout for a small always-visible window, `q` quits.
 `qal-scribe --plain` prints one line per event instead, for logs or terminals without a full UI.
 
@@ -127,7 +127,7 @@ words file).
 ## More languages (experimental)
 
 Tigrinya (`tir`), Afaan Oromo (`orm`), Somali (`som`), Sidaama (`sid`) and Wolaytta (`wal`) run through the same
-engine with other open models. They are rough drafts at best: see [docs/languages.md](docs/languages.md) for
+engine with other open models. They are rough drafts at best: see [docs/languages.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/languages.md) for
 their accuracy and licences (the Somali model is non-commercial). Download one with
 `qal-scribe models download tir`, then press `l` in the window or set `language = "tir"`. Translation and the
 text clean-up settings are made for Amharic.
@@ -140,7 +140,7 @@ qal-scribe --plain             the same, one line per event
 qal-scribe doctor              check permissions, microphone, device, config and models
 qal-scribe models              list languages and whether each model is downloaded
 qal-scribe models download [LANG] [--translation]
-qal-scribe transcribe FILE.wav [--translate]   16 kHz mono wav to text
+qal-scribe transcribe FILE [--translate]       an audio file (wav, flac, ogg, mp3) to text
 qal-scribe config [--init]     show (or create) the config file
 qal-scribe toggle [--translate]                start/stop recording in the running instance
 qal-scribe about               licences and model attribution

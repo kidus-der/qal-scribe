@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from multiprocessing import resource_tracker
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -97,6 +98,10 @@ class QalApp(App):
     ]
 
     def __init__(self, cfg: Config, controller_factory: Callable = make_controller):
+        # Textual swaps sys.stderr for an object whose fileno() is -1. The first tqdm bar of a model load makes a
+        # multiprocessing lock, which starts this tracker, which hands stderr's fd to its child: start it while
+        # stderr is still real.
+        resource_tracker.ensure_running()
         super().__init__()
         self.cfg = cfg
         self.controller_factory = controller_factory
@@ -180,8 +185,8 @@ class QalApp(App):
                 self.query_one(Meter).reset()
             case ev.Transcribed() as done:
                 await self.finish(done)
-            case ev.Notice(text, level):
-                if level != "info" and self.pending:  # a skipped or failed clip never produces Transcribed
+            case ev.Notice(text, level, clip):
+                if clip and self.pending:  # a skipped or failed clip never produces Transcribed
                     self.pending.pop(0)
                 self.notify(text, severity=SEVERITY[level], timeout=10 if level == "error" else 5)
         self.refresh_view()
@@ -191,7 +196,10 @@ class QalApp(App):
             self.pending.pop(0)
         self.last, self.loading_message = done, ""
         history = self.query_one(ListView)
+        highlighted = history.index
         await history.insert(0, [HistoryRow(done)])
+        if highlighted is not None:  # insert() does not shift the index: keep it on the row that is highlighted
+            history.index = highlighted + 1
         if len(history) > HISTORY_LIMIT:
             await history.pop()
         if self.focused is None:  # the list is hidden (so unfocusable) until the first entry exists
@@ -220,6 +228,8 @@ class QalApp(App):
 
     @property
     def state(self) -> str:
+        if self.quitting:
+            return "quitting"
         if self.failure:
             return "failed"
         if self.rec_mode:
@@ -230,7 +240,7 @@ class QalApp(App):
 
     def tick(self) -> None:
         self.spin = (self.spin + 1) % len(SPINNER)
-        if self.state in ("loading", "recording", "transcribing", "translating"):
+        if self.state in ("loading", "recording", "transcribing", "translating", "quitting"):
             self.refresh_view()
 
     def pill_label(self) -> str:
@@ -244,22 +254,26 @@ class QalApp(App):
             case "transcribing":
                 return f"{spinner} TRANSCRIBING"
             case "translating":
-                return f"{spinner} TRANSLATE"
+                return f"{spinner} TRANSLATING"
+            case "quitting":
+                return f"{spinner} QUITTING"
             case "failed":
                 return "ERROR"
         return "READY"
 
     def status_line(self) -> Content:
+        spec = models.MODELS.get(self.info.language if self.info else self.language)
+        name = spec.language_name if spec else ""
         if not self.info:
-            return Content("")
-        name = models.MODELS[self.info.language].language_name if self.info.language in models.MODELS else ""
+            return Content(name)
         model = self.info.model.rsplit("/", 1)[-1]
-        parts = [name, model, self.info.device, "LM on" if self.info.lm else "LM off"]
-        if self.mic:
-            parts.append(f"mic {self.mic}")
-        return Content(" · ".join(p for p in parts if p))
+        return Content(" · ".join(p for p in [name, model, self.info.device, "LM on" if self.info.lm else "LM off"] if p))
 
     def hero(self) -> Content:
+        if self.quitting:
+            return Content(f"{SPINNER[self.spin]}  Quitting…")
+        if self.failure and self.screen.has_class("-compact"):
+            return Content.assemble(("Could not start: ", "bold $error"), self.failure)
         if self.failure:
             return Content.assemble(("Could not start\n", "bold $error"), self.failure, "\nPress q to quit.")
         if self.loading or not self.info:
@@ -284,27 +298,41 @@ class QalApp(App):
             self.screen.set_class(s == state, f"-{s}")
         top = self.query_one(TopBar)
         top.set_pill(self.pill_label())
-        top.set_status(self.status_line())
+        top.set_status(self.status_line(), f" · mic {self.mic}" if self.info and self.mic else "")
         keys = "  ".join(f"{key} {mode}" for key, mode in self.hotkeys.items())
         self.query_one("#keys", Static).update(keys)
         stage = self.query_one(Stage)
-        stage.border_title = "Starting" if state in ("loading", "failed") else MODE_NAMES[self.active_mode()]
+        compact = self.screen.has_class("-compact")
+        stage.border_title = self.stage_title(state)
         stage.border_subtitle = self.stage_subtitle()
         if self.rec_mode:
             stage.show_transcript(self.partial or "listening…", live=True)
+        elif self.last and not self.last.text and state in ("ready", "transcribing", "translating"):
+            stage.show_transcript("(nothing recognised)", empty=True)
         elif self.last and state in ("ready", "transcribing", "translating"):
-            stage.show_transcript(self.last.text or "(nothing recognised)")
+            not_pasted = compact and not self.last.pasted  # compact has no border for the subtitle that says so
+            stage.show_transcript(self.last.text + ("  ✗ not pasted" if not_pasted else ""))
         else:
-            stage.show_hero(self.hero(), big=not self.screen.has_class("-compact"))
+            stage.show_hero(self.hero(), big=not compact)
         history = self.query_one(ListView)
         history.display = bool(len(history))
         self.query_one("#history-empty").display = not len(history)
-        self.query_one("#history-panel").border_subtitle = HISTORY_LEGEND if len(history) else ""
+        legend = HISTORY_LEGEND
+        if self.screen.has_class("-narrow"):  # which hides the stats column
+            legend = legend.removeprefix("audio · compute   ")
+        self.query_one("#history-panel").border_subtitle = legend if len(history) else ""
 
     def active_mode(self) -> ev.Mode:
         if self.rec_mode or self.pending:
             return self.rec_mode or self.pending[0]
         return self.last.mode if self.last else "dictate"
+
+    def stage_title(self, state: str) -> str:
+        if state == "failed":
+            return "Error"
+        if state == "loading":
+            return "Loading" if self.info else "Starting"
+        return MODE_NAMES[self.active_mode()]
 
     def stage_subtitle(self) -> str:
         if self.rec_mode:
@@ -327,14 +355,23 @@ class QalApp(App):
             self.notify("nothing to copy yet", severity="warning", timeout=2)
 
     def copy(self, text: str) -> None:
-        self.copy_to_clipboard(text)
-        self.notify("copied", timeout=1.5)
+        from qal_scribe import paste
+
+        self.copy_to_clipboard(text)  # OSC 52: the terminal's clipboard (e.g. over ssh); macOS Terminal ignores it
+        if paste.copy(text):
+            self.notify("copied", timeout=1.5)
+        else:
+            self.notify("no clipboard tool found; asked the terminal to copy it (OSC 52)", severity="warning",
+                        timeout=4)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, HistoryRow) and event.item.entry.text:
             self.copy(event.item.entry.text)
 
     def action_language(self) -> None:
+        if self.loading or self.failure:  # a second model load beside the first would share the same RAM
+            self.notify("wait until the model has loaded", severity="warning", timeout=2)
+            return
         codes = installed_languages(self.language)
         switch = getattr(self.controller, "set_language", None)
         if len(codes) < 2:
@@ -362,6 +399,7 @@ class QalApp(App):
         if self.quitting:
             return
         self.quitting = True
+        self.refresh_view()
         stop = getattr(self.controller, "stop", None)
         self.run_worker(stop or (lambda: None), thread=True, name="stop", group="stop", exit_on_error=False)
 

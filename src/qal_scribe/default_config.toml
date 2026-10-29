@@ -1,5 +1,6 @@
-# qal-scribe settings. Every line below is commented out and shows the default (except `device`, which is
-# automatic when unset): remove the leading "# " from a line to change that setting. Run `qal-scribe doctor` after editing to check the file.
+# qal-scribe settings. Every line below is commented out and shows the default (except `device`, `words_file`
+# and `mic`, which are examples): remove the leading "# " from a line to change that setting.
+# Run `qal-scribe doctor` after editing to check the file.
 
 # Language to dictate (`qal-scribe models` lists the available ones).
 # language = "amh"
@@ -24,8 +25,10 @@
 # merge_homophones = false
 # Add punctuation with simple rules. Experimental: expect mistakes.
 # punctuation = false
-# Your own corrections, one `heard => wanted` per line (lines starting with # are ignored).
-# words_file = "~/.config/qal-scribe/words.txt"
+# Your own corrections, one `heard => wanted` per line (lines starting with # are ignored). By default they
+# are read from words.txt in qal-scribe's config folder (the folder `qal-scribe config` shows); set this to
+# use another file. The path below is only an example.
+# words_file = "~/Documents/qal-words.txt"
 
 # Seconds to wait before putting your clipboard back after pasting. Raise it if an app pastes
 # your old clipboard instead of the dictated text.
@@ -42,6 +45,7 @@
 # Show a live draft of the text while you are still speaking.
 # preview = true
 
-# Terminal UI.
+# Terminal UI. Themes: qal, qal-light, or a built-in Textual theme such as nord, gruvbox, dracula,
+# tokyo-night, catppuccin-mocha, solarized-light or textual-dark (press t in the window to try them all).
 # theme = "qal"
 # compact = false

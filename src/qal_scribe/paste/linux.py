@@ -62,7 +62,7 @@ def _run(argv: list[str], data: bytes | None = None, timeout: float = TIMEOUT) -
     return done.returncode == 0
 
 
-def _copy(text: str) -> bool:
+def copy(text: str) -> bool:
     argv = _copier()
     return argv is not None and _run(argv, text.encode())
 
@@ -78,7 +78,7 @@ def _clipboard_text() -> bytes | None:
 
 def _ydotool_paste(text: str, restore_delay: float) -> bool:
     saved = _clipboard_text()  # text only: an image or file on the clipboard is left alone (and replaced by ours)
-    if not (_copy(text) and _run(CTRL_V)):
+    if not (copy(text) and _run(CTRL_V)):
         return False
     time.sleep(restore_delay)  # apps read the clipboard a moment after Ctrl+V
     if saved is not None and _clipboard_text() == text.encode():  # don't clobber a copy made in the meantime
@@ -100,5 +100,5 @@ def _insert(backend: str, text: str, restore_delay: float) -> bool:
 def paste(text: str, restore_delay: float = 0.5) -> bool:
     if any(_insert(b, text, restore_delay) for b in backends()):
         return True
-    _copy(text)
+    copy(text)
     return False

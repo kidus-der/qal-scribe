@@ -48,8 +48,12 @@ class FakeController:
         self.languages.append(code)
 
 
-def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None):
-    """Run `scenario(app, fake, pilot)` against the app (fake = the FakeController it started)."""
+COPIED: list[str] = []  # what the copy key put on the (fake) system clipboard
+
+
+def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipboard=True):
+    """Run `scenario(app, fake, pilot)` against the app (fake = the FakeController it started).
+    clipboard=False: the system clipboard is unreachable."""
     made: list[FakeController] = []
 
     def make(c, emit):
@@ -63,7 +67,9 @@ def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None):
                 await settle(pilot)
             await scenario(app, made[0] if made else None, pilot)
 
-    with mock.patch.object(app_mod, "mic_name", lambda device=None: "Test Microphone"):  # never open the audio stack
+    COPIED.clear()
+    with (mock.patch.object(app_mod, "mic_name", lambda device=None: "Test Microphone"),  # never open the audio stack
+          mock.patch("qal_scribe.paste.copy", lambda text: COPIED.append(text) or clipboard)):  # nor the clipboard
         asyncio.run(go())
 
 
@@ -162,6 +168,34 @@ def test_ready_shows_model_device_mic_and_the_empty_states():
     drive(scenario)
 
 
+def test_model_progress_bars_in_the_boot_thread_do_not_break_the_start(tmp_path):
+    """Textual's stderr has no file descriptor; the first tqdm bar starts multiprocessing's resource tracker,
+    which needs one. A fresh interpreter, so neither the tracker nor tqdm's lock exist yet (as in real use)."""
+    script = tmp_path / "boot.py"
+    script.write_text(
+        "import asyncio\n"
+        "from qal_scribe import app as app_mod, events as ev\n"
+        "from qal_scribe.config import Config\n"
+        "app_mod.mic_name = lambda device=None: None\n"
+        "class Fake:\n"
+        "    def __init__(self, cfg, emit): self.emit = emit\n"
+        "    def start(self):\n"
+        "        from tqdm import tqdm\n"
+        "        for _ in tqdm(range(3)): pass\n"
+        "        self.emit(ev.Ready('cpu', 'm', 'amh', False, {}))\n"
+        "    def stop(self): pass\n"
+        "async def go():\n"
+        "    app = app_mod.QalApp(Config(), controller_factory=Fake)\n"
+        "    async with app.run_test() as pilot:\n"
+        "        await asyncio.to_thread(app.boot_thread.join, 20)\n"
+        "        await pilot.pause()\n"
+        "        print(repr(app.failure), app.info is not None)\n"
+        "asyncio.run(go())\n"
+    )
+    done = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=60, check=False)
+    assert done.stdout.strip() == "'' True", done.stdout + done.stderr
+
+
 def test_a_failed_start_shows_the_error_instead_of_loading_forever():
     def broken(cfg, emit):
         raise OSError("no network")
@@ -173,6 +207,49 @@ def test_a_failed_start_shows_the_error_instead_of_loading_forever():
         assert any("no network" in message for message, severity in toasts(app))
 
     drive(scenario, factory=broken)
+
+
+def test_a_long_start_error_fits_with_the_way_out():
+    reason = ("OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them "
+              "in the cached files. Check your internet connection or see how to run the library in offline mode.")
+
+    def broken(cfg, emit):
+        raise OSError(reason.removeprefix("OSError: "))
+
+    async def scenario(app, fake, pilot):
+        await settle(pilot)
+        assert app.query_one("#stage").border_title == "Error"
+        assert "offline mode" in screen_text(app) and "Press q to quit." in screen_text(app)
+
+    drive(scenario, factory=broken, size=(80, 24))
+
+    async def compact(app, fake, pilot):
+        await settle(pilot)
+        assert "Could not start: OSError: We couldn't" in screen_text(app)
+
+    drive(compact, factory=broken, size=(80, 4), cfg=Config(compact=True))
+
+
+def test_before_ready_the_header_names_the_language():
+    async def scenario(app, fake, pilot):
+        assert fake.started.wait(5)
+        await pilot.pause()
+        assert shown(app, "#status") == "Amharic" and app.query_one("#stage").border_title == "Starting"
+        fake.hold.set()
+        await settle(pilot)
+
+    drive(scenario, hold=True)
+
+
+def test_status_drops_the_mic_rather_than_cutting_it_off():
+    async def scenario(app, fake, pilot):
+        await pilot.pause()
+        assert "mic" not in screen_text(app).splitlines()[0] and "LM on" in shown(app, "#status")
+        await pilot.resize_terminal(120, 36)
+        await pilot.pause()
+        assert "LM on · mic Test Microphone" in screen_text(app).splitlines()[0]
+
+    drive(scenario, size=(80, 20))
 
 
 # -- recording, transcribing, translating ----------------------------------------------------------------
@@ -191,6 +268,21 @@ def test_recording_shows_the_timer_meter_and_live_partial():
         assert pill(app).startswith("● REC 1:0")
 
     drive(scenario)
+
+
+@pytest.mark.parametrize(("size", "compact"), [((80, 24), False), ((80, 5), True)])
+def test_a_long_live_draft_keeps_its_newest_words_in_view(size, compact):
+    words = [f"ቃል{i}" for i in range(120)]
+
+    async def scenario(app, fake, pilot):
+        await send(pilot, ev.RecordingStarted("dictate"), ev.Partial(" ".join(words)))
+        await pilot.pause()
+        app.refresh_view()  # the 0.1 s tick does this while recording
+        await pilot.pause()
+        text = screen_text(app)
+        assert words[-1] in text and words[0] not in text
+
+    drive(scenario, size=size, cfg=Config(compact=compact))
 
 
 def test_levels_outside_a_recording_are_ignored():
@@ -232,7 +324,7 @@ def test_translate_mode_has_its_own_pill_title_and_border():
         assert "REC → EN" in pill(app) and "release Right Control to finish" in screen_text(app)
         assert app.query_one("#stage").border_title == "Translate → English"
         await send(pilot, ev.RecordingStopped("translate", 2.0))
-        assert "TRANSLATE" in pill(app) and app.screen.has_class("-translating")
+        assert "TRANSLATING" in pill(app) and app.screen.has_class("-translating")
         assert "Translating…" in screen_text(app)
         await send(pilot, done("hello world", mode="translate"))
         assert pill(app) == "READY" and "→ EN" in screen_text(app)
@@ -243,7 +335,7 @@ def test_translate_mode_has_its_own_pill_title_and_border():
 def test_translation_model_loading_is_a_note_not_a_return_to_loading():
     async def scenario(app, fake, pilot):
         await send(pilot, ev.RecordingStopped("translate", 2.0), ev.Loading("loading translation model"))
-        assert "TRANSLATE" in pill(app) and "loading translation model" in screen_text(app)
+        assert "TRANSLATING" in pill(app) and "loading translation model" in screen_text(app)
         await send(pilot, done("hello", mode="translate"))
         assert pill(app) == "READY" and "loading translation model" not in screen_text(app)
 
@@ -273,10 +365,21 @@ def test_a_new_recording_wins_over_a_clip_still_being_transcribed():
     drive(scenario)
 
 
+def test_a_notice_about_something_else_does_not_end_the_clip():
+    async def scenario(app, fake, pilot):
+        await send(pilot, ev.RecordingStarted("dictate"), ev.RecordingStopped("dictate", 3.0))
+        await send(pilot, ev.Notice("already switching language", "warning"))
+        assert "TRANSCRIBING" in pill(app)
+        await send(pilot, done())
+        assert pill(app) == "READY"
+
+    drive(scenario)
+
+
 def test_a_skipped_clip_does_not_leave_the_pill_on_transcribing():
     async def scenario(app, fake, pilot):
         await send(pilot, ev.RecordingStarted("dictate"), ev.RecordingStopped("dictate", 0.1))
-        await send(pilot, ev.Notice("too short or silent", "warning"))
+        await send(pilot, ev.Notice("too short or silent", "warning", clip=True))
         assert pill(app) == "READY"
 
     drive(scenario)
@@ -287,10 +390,21 @@ def test_nothing_recognised_and_not_pasted_are_marked():
         await send(pilot, ev.RecordingStopped("dictate", 1.0), done("", pasted=False))
         text = screen_text(app)
         assert "(nothing recognised)" in text and "✗" in text and "not pasted" in text
+        assert app.query_one("#stage").has_class("-empty")
         await pilot.press("c")
         assert toasts(app)[-1] == ("nothing to copy yet", "warning")
 
     drive(scenario)
+
+
+def test_compact_marks_a_result_that_was_not_pasted():
+    async def scenario(app, fake, pilot):
+        await send(pilot, done("ሰላም", pasted=False))
+        assert "ሰላም  ✗ not pasted" in screen_text(app)
+        await send(pilot, done("ዓለም"))
+        assert "not pasted" not in screen_text(app)
+
+    drive(scenario, size=(80, 5), cfg=Config(compact=True))
 
 
 def test_transcripts_with_markup_characters_render_literally():
@@ -329,6 +443,17 @@ def test_history_is_newest_first_with_time_mode_stats_and_paste_flag():
     drive(scenario)
 
 
+def test_a_long_entry_takes_at_most_two_history_rows():
+    async def scenario(app, fake, pilot):
+        await send(pilot, done(" ".join(["ረጅም"] * 200)), done("አጭር"))
+        assert [r.query_one(".text").size.height for r in app.query(HistoryRow)] == [1, 2]
+        text = screen_text(app)
+        assert "አጭር" in text and "0.13s" not in text.split("History")[1]  # 80 columns: the text gets the stats' room
+        assert "✓ pasted" in text and "audio · compute" not in text
+
+    drive(scenario, size=(80, 24))
+
+
 def test_history_keeps_only_the_most_recent_entries(monkeypatch):
     monkeypatch.setattr(app_mod, "HISTORY_LIMIT", 3)
 
@@ -342,13 +467,24 @@ def test_history_keeps_only_the_most_recent_entries(monkeypatch):
 # -- key bindings -------------------------------------------------------------------------------------------
 
 
-def test_c_copies_the_last_transcript_without_touching_the_system_clipboard():
+def test_c_copies_the_last_transcript_to_the_system_clipboard():
     async def scenario(app, fake, pilot):
         await send(pilot, done("አንድ"), done("ሁለት"))
         await pilot.press("c")
-        assert app.clipboard == "ሁለት" and ("copied", "information") in toasts(app)
+        assert COPIED == ["ሁለት"] and app.clipboard == "ሁለት" and ("copied", "information") in toasts(app)
 
     drive(scenario)
+
+
+def test_c_without_a_clipboard_says_so_instead_of_copied():
+    async def scenario(app, fake, pilot):
+        await send(pilot, done("አንድ"))
+        await pilot.press("c")
+        assert app.clipboard == "አንድ"  # still sent to the terminal (OSC 52)
+        [(message, severity)] = toasts(app)
+        assert "no clipboard tool" in message and severity == "warning"
+
+    drive(scenario, clipboard=False)
 
 
 def test_enter_copies_the_selected_history_row():
@@ -356,6 +492,25 @@ def test_enter_copies_the_selected_history_row():
         await send(pilot, done("አንድ"), done("ሁለት"))
         await pilot.press("down", "down", "enter")
         assert app.clipboard == "አንድ"
+
+    drive(scenario)
+
+
+def test_enter_copies_the_highlighted_row_after_new_entries_arrive(monkeypatch):
+    monkeypatch.setattr(app_mod, "HISTORY_LIMIT", 4)
+
+    async def scenario(app, fake, pilot):
+        await send(pilot, done("one"), done("two"), done("three"))
+        await pilot.press("down")  # highlights "three", the newest
+        await send(pilot, done("four"))
+        history = app.query_one("#history")
+        assert history.highlighted_child.entry.text == "three"
+        assert [r.entry.text for r in app.query(HistoryRow) if r.has_class("-highlight")] == ["three"]
+        await pilot.press("enter")
+        assert app.clipboard == "three"
+        await pilot.press("down", "down")  # "one", the oldest, which the next entry pushes out
+        await send(pilot, done("five"))
+        assert rows(app) == ["five", "four", "three", "two"] and history.highlighted_child.entry.text == "two"
 
     drive(scenario)
 
@@ -386,6 +541,20 @@ def test_l_cycles_languages_through_the_controller(monkeypatch):
         assert fake.languages == ["swh", "amh"]
 
     drive(scenario)
+
+
+def test_l_waits_while_the_model_loads(monkeypatch):
+    two_languages(monkeypatch)
+
+    async def scenario(app, fake, pilot):
+        assert fake.started.wait(5)
+        await send(pilot, ev.Loading("downloading model 40%"))
+        await pilot.press("l")
+        assert fake.languages == [] and toasts(app) == [("wait until the model has loaded", "warning")]
+        fake.hold.set()
+        await settle(pilot)
+
+    drive(scenario, hold=True)
 
 
 def test_l_degrades_when_the_controller_cannot_switch_language(monkeypatch):
@@ -444,6 +613,19 @@ def test_q_stops_the_controller_and_exits():
         await pilot.press("q")
         await settle(pilot)
         assert fake.stopped and not app.is_running
+
+    drive(scenario)
+
+
+def test_q_says_it_is_quitting_while_stop_waits():
+    async def scenario(app, fake, pilot):
+        release = threading.Event()
+        fake.stop = lambda: release.wait(5)
+        await pilot.press("q")
+        assert "QUITTING" in pill(app) and "Quitting…" in screen_text(app)
+        release.set()
+        await settle(pilot)
+        assert not app.is_running
 
     drive(scenario)
 

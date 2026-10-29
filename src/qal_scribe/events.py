@@ -57,6 +57,7 @@ class Transcribed:
 class Notice:
     message: str
     level: Literal["info", "warning", "error"] = "info"
+    clip: bool = False  # True when it ends a recorded clip that will never be Transcribed (skipped or failed)
 
 
 Event = Loading | Ready | RecordingStarted | Level | RecordingStopped | Partial | Transcribed | Notice

@@ -161,3 +161,124 @@ def test_models_are_fetched_before_the_ui_only_when_missing(monkeypatch, hf_cach
     hf_cache(spec.repo, spec.revision, spec.lm_file)
     cli.main([])
     assert downloads == [True, True] and len(started) == 3
+
+
+def test_plain_format_says_when_recording_starts_and_stops():
+    from qal_scribe import events as ev
+    from qal_scribe.plain import format_event
+
+    assert format_event(ev.RecordingStarted("dictate")) == "● recording (dictate)"
+    assert format_event(ev.RecordingStopped("translate", 2.04)) == "… 2.0s recorded, translating"
+    assert format_event(ev.Partial("draft")) is None  # too chatty for a log
+    assert format_event(ev.Transcribed("dictate", "", "", 0.4, 0.05, False)).endswith("0.05s] (nothing recognised)")
+    assert format_event(ev.Transcribed("dictate", "ሰላም", "", 1, 0.1, False)).endswith("] ሰላም (not pasted)")
+
+
+def test_help_says_how_to_start_and_subcommands_describe_themselves(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    assert "Run with no command to start dictating" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cli.main(["doctor", "--help"])
+    assert "check permissions" in capsys.readouterr().out
+
+
+def test_models_lists_aligned_columns_and_the_translation_model(capsys):
+    cli.main(["models"])
+    lines = capsys.readouterr().out.splitlines()
+    table = lines[: len(models.MODELS) + 2]
+    assert "facebook/nllb-200-distilled-600M" in table[-1] and "not downloaded" in table[-1]
+    assert len({line.index("CC-BY") for line in table[1:]}) == 1  # one licence column
+    assert lines[-1].startswith("download one with: qal-scribe models download LANG")
+
+
+def test_doctor_with_a_missing_explicit_config_fails_like_the_other_commands(tmp_path):
+    assert "no config file" in exit_message(["--config", str(tmp_path / "typo.toml"), "doctor"])
+
+
+def test_download_failure_drops_the_hubs_got_prefix(monkeypatch):
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    def offline(spec, with_lm=False):
+        raise LocalEntryNotFoundError("Got: ConnectError: [Errno 61] Connection refused\nAn error happened ...")
+
+    monkeypatch.setattr(models, "download", offline)
+    assert "\n  ConnectError: [Errno 61] Connection refused\n" in exit_message(["models", "download"])
+
+
+# --- transcribe -----------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_engine(monkeypatch, hf_cache):
+    """transcribe with a stand-in Engine that records the audio it was given; the models count as downloaded."""
+    import numpy as np
+
+    from qal_scribe import engine
+
+    spec = models.MODELS["amh"]
+    for f in ("model.safetensors", spec.lm_file):
+        hf_cache(spec.repo, spec.revision, f)
+    heard = []
+
+    class Engine:
+        device = "cpu"
+
+        def __init__(self, spec, device=None, use_lm=True):
+            pass
+
+        def load(self, on_progress=None):
+            pass
+
+        def transcribe(self, audio):
+            heard.append(np.asarray(audio))
+            return engine.Result("ሞዴል ይሰራል", 0.1)
+
+    monkeypatch.setattr(engine, "Engine", Engine)
+    monkeypatch.setattr(cli, "quiet_progress_bars", lambda: None)  # process-wide; keep it out of other tests
+    return heard
+
+
+def write_wav(path, rate, channels=1, seconds=1.0):
+    import numpy as np
+    import soundfile as sf
+
+    t = np.arange(int(rate * seconds)) / rate
+    tone = 0.3 * np.sin(2 * np.pi * 440 * t)
+    sf.write(path, np.stack([tone] * channels, axis=1) if channels > 1 else tone, rate)
+    return str(path)
+
+
+def test_transcribe_applies_the_words_file(tmp_path, capsys, fake_engine):
+    (tmp_path / "xdg" / "qal-scribe").mkdir(parents=True)
+    (tmp_path / "xdg" / "qal-scribe" / "words.txt").write_text("ሞዴል => MODEL\n", encoding="utf-8")
+    cli.main(["transcribe", write_wav(tmp_path / "a.wav", 16000)])
+    assert capsys.readouterr().out == "MODEL ይሰራል\n"
+
+
+def test_transcribe_takes_stereo_and_other_sample_rates(tmp_path, capsys, fake_engine):
+    import numpy as np
+
+    cli.main(["transcribe", write_wav(tmp_path / "phone.wav", 48000, channels=2, seconds=0.5)])
+    (audio,) = fake_engine
+    assert audio.ndim == 1 and len(audio) == 8000 and audio.dtype == np.float32
+    peak = np.abs(np.fft.rfft(audio)).argmax() * 16000 / len(audio)
+    assert abs(peak - 440) < 5 and 0.25 < np.abs(audio).max() < 0.35  # same tone, same loudness
+    assert capsys.readouterr().out == "ሞዴል ይሰራል\n"
+
+
+def test_transcribe_a_missing_file_says_so(tmp_path):
+    missing = str(tmp_path / "missing.wav")
+    assert exit_message(["transcribe", missing]) == f"qal-scribe: no such file: {missing}"
+
+
+def test_transcribe_says_on_stderr_when_it_downloads_first(tmp_path, capsys, monkeypatch, fake_engine, hf_cache):
+    downloads = []
+    monkeypatch.setattr(models, "download", lambda spec, with_lm=False: downloads.append(spec.language))
+    monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
+    monkeypatch.setattr("qal_scribe.translate.Translator.load", lambda self: None)
+    monkeypatch.setattr("qal_scribe.translate.Translator.translate", lambda self, text: "it works")
+    cli.main(["transcribe", "--translate", write_wav(tmp_path / "a.wav", 16000)])
+    captured = capsys.readouterr()
+    assert downloads == ["nllb"] and captured.out == "it works\n"
+    assert "First translation: fetching facebook/nllb-200-distilled-600M" in captured.err

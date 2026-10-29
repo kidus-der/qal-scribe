@@ -309,8 +309,9 @@ def test_failed_switch_keeps_the_old_model(monkeypatch, tmp_path, two_languages)
     new.fail_load = True
     monkeypatch.setattr(controller, "Engine", lambda spec, device, use_lm: new)
     c.set_language("xyz")
-    wait_for(lambda: "Notice" in kinds(out))
-    assert out[-1].level == "error" and "Xyzish" in out[-1].message
+    wait_for(lambda: "Ready" in kinds(out))
+    assert kinds(out) == ["Loading", "Loading", "Notice", "Ready"]  # Ready: the UI leaves its loading state
+    assert out[2].level == "error" and "Xyzish" in out[2].message and out[3].language == "amh"
     assert c.engine is old and not old.unloaded and c.cfg.language == "amh"
 
 
@@ -367,13 +368,16 @@ def test_stop_releases_everything(monkeypatch, tmp_path):
 
 def test_stop_waits_for_the_model_call_in_flight_and_drops_queued_clips(monkeypatch, tmp_path):
     c, out = make(monkeypatch, tmp_path, transcribe_seconds=0.2)
+    pastes = []
+    monkeypatch.setattr(controller.paste, "paste", lambda text, delay: pastes.append(text) or True)
     worker = start_worker(c)
     c._clips.put(("dictate", AUDIO))
     c._clips.put(("dictate", AUDIO))
     assert c.engine.transcribing.wait(3)
     c.stop()  # returns only after the running transcription released the model
     worker.join(3)
-    assert c.engine.unloaded and kinds(out) == ["Transcribed"]
+    assert c.engine.unloaded
+    assert pastes == [] and kinds(out) == []  # not even the clip in flight: its ⌘V would land in the terminal
 
 
 def test_stop_does_not_hang_on_a_stuck_model_call(monkeypatch, tmp_path):
@@ -384,9 +388,92 @@ def test_stop_does_not_hang_on_a_stuck_model_call(monkeypatch, tmp_path):
     assert not c.engine.unloaded
 
 
+def test_stop_lets_a_paste_in_flight_restore_the_clipboard(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    clipboard, pasting = ["mine"], threading.Event()
+
+    def paste(text, delay):
+        clipboard.append(text)
+        pasting.set()
+        time.sleep(0.2)  # restore_delay
+        clipboard.pop()
+        return True
+
+    monkeypatch.setattr(controller.paste, "paste", paste)
+    final = threading.Thread(target=c.handle, args=("dictate", AUDIO))
+    final.start()
+    assert pasting.wait(3)
+    c.stop()
+    assert clipboard == ["mine"]
+    final.join(3)
+
+
 def test_stop_before_start_is_safe(monkeypatch, tmp_path):
     cfg = config.Config(words_file=tmp_path / "words.txt")
     c = controller.Controller(cfg, lambda e: None)
     c.engine = FakeEngine()
     c.stop()
     assert c.engine.unloaded
+
+
+# --- hotkeys and `toggle` together, and errors on the hotkey thread ----------------------------------------------
+
+
+def test_hotkey_release_after_a_toggle_stop_does_not_send_the_clip_twice(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c.hotkeys = FakeHotkeys()
+    c._start_recording("dictate")  # hold the key
+    c.toggle()  # `qal-scribe toggle` stops it
+    c._stop_recording("dictate")  # release the key
+    assert c._clips.qsize() == 1 and kinds(out).count("RecordingStopped") == 1
+
+
+def test_hotkey_during_a_toggle_recording_leaves_no_preview_running(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c.hotkeys = FakeHotkeys()
+    c.toggle("translate")
+    c._start_recording("dictate")  # a hotkey press while recording: ignored
+    wait_for(lambda: c.engine.preview_calls > 0)
+    c._stop_recording("dictate")  # its release ends the recording, in the mode it started with
+    time.sleep(0.05)
+    calls = c.engine.preview_calls
+    time.sleep(0.2)
+    assert c.engine.preview_calls == calls and kinds(out).count("RecordingStarted") == 1
+    assert c._clips.get_nowait()[0] == "translate" and c._clips.empty()
+
+
+def test_a_mic_error_on_the_hotkey_thread_becomes_a_notice(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+
+    def unplugged():
+        raise OSError("Error starting stream: Internal PortAudio error [PaErrorCode -9986]")
+
+    c.recorder.start = unplugged
+    c._start_recording("dictate")  # must not raise: pynput would stop listening for good
+    c._stop_recording("dictate")
+    (notice,) = out
+    assert notice.level == "error" and "PortAudio" in notice.message and c._clips.empty()
+
+
+def test_a_failed_stop_ends_the_clip_for_the_ui(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c._start_recording("dictate")
+
+    def broken():
+        raise OSError("device gone")
+
+    c.recorder.stop = broken
+    c._stop_recording("dictate")
+    assert kinds(out)[-2:] == ["RecordingStopped", "Notice"] and out[-1].clip and c._clips.empty()
+
+
+def test_notices_that_end_a_clip_say_so(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c.handle("dictate", np.zeros(16000, dtype="float32"))
+    c.engine.transcribe = lambda audio: 1 / 0
+    worker = start_worker(c)
+    c._clips.put(("dictate", AUDIO))
+    wait_for(lambda: len(out) == 2)
+    c.stop()
+    worker.join(3)
+    assert [(e.level, e.clip) for e in out] == [("warning", True), ("error", True)]

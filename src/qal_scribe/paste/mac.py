@@ -33,6 +33,13 @@ def restore_clipboard(pb, saved: list[dict]) -> None:
         pb.writeObjects_(items)
 
 
+def copy(text: str, pb=None) -> bool:
+    """Put text on the clipboard for good (no ⌘V, no restore); needs no permission."""
+    pb = pb or NSPasteboard.generalPasteboard()
+    pb.clearContents()
+    return bool(pb.setString_forType_(text, NSPasteboardTypeString))
+
+
 def paste(text: str, restore_delay: float = 0.5, pb=None) -> bool:
     if not AXIsProcessTrusted():
         return False

@@ -178,9 +178,11 @@ def check_disk() -> Check:
 
 
 def run(path: Path) -> int:
-    config_check, cfg = check_config(path)
-    checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_paste(), check_input_monitoring(),
-              config_check, *check_models(cfg), check_disk()]
+    console = Console()
+    with console.status("checking…"):  # the first torch import after an install takes ~10 s
+        config_check, cfg = check_config(path)
+        checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_paste(),
+                  check_input_monitoring(), config_check, *check_models(cfg), check_disk()]
     checks = [c for c in checks if c]
     table = Table(title="qal-scribe doctor", title_justify="left", header_style="bold")
     with_fix = any(c.fix for c in checks)
@@ -188,7 +190,6 @@ def run(path: Path) -> int:
         table.add_column(column, overflow="fold")
     for c in checks:
         table.add_row(c.name, STATUS[c.status], escape(c.detail), *((escape(c.fix),) if with_fix else ()))
-    console = Console()
     console.print(table)
     failed = [c.name for c in checks if c.status == "fail"]
     warned = sum(c.status == "warn" for c in checks)
