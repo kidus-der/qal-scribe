@@ -9,3 +9,11 @@ their own licences:
 - facebook/nllb-200-distilled-600M (optional Amharic -> English translation)
   https://huggingface.co/facebook/nllb-200-distilled-600M
   Licence: CC-BY-NC-4.0 (non-commercial) https://creativecommons.org/licenses/by-nc/4.0/
+
+- badrex/Ethio-ASR-tigrinya, -oromo, -sidaama, -wolaytta (experimental speech recognition for other languages)
+  https://huggingface.co/badrex/Ethio-ASR-multilingual-600M (the Ethio-ASR project; see each model card)
+  Licence: CC-BY-4.0 https://creativecommons.org/licenses/by/4.0/
+
+- IbrahimDayax/xls-r-1b-somali-stt-asr (experimental Somali speech recognition)
+  https://huggingface.co/IbrahimDayax/xls-r-1b-somali-stt-asr
+  Licence: CC-BY-NC-4.0 (non-commercial) https://creativecommons.org/licenses/by-nc/4.0/
