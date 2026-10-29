@@ -2,6 +2,8 @@
 
 Contract: serve(on_toggle) starts a daemon thread; each `qal-scribe toggle [--translate]` calls on_toggle(mode)
 with mode "dictate" | "translate". serve raises RuntimeError if another instance is already listening.
+stop() closes the listener and removes the socket file (no-op when not serving). If on_toggle raises, the client
+gets "error: <message>".
 send_toggle(mode="dictate") -> process exit code (0 ok, 1 with a message on stderr).
 Wire format: the client sends the mode and a newline; the server answers "ok\\n" or "error: ...\\n".
 """
@@ -92,12 +94,24 @@ def _accept_loop(srv: socket.socket, on_toggle: Callable[[Mode], None]) -> None:
             _handle(conn, on_toggle)
 
 
+_servers: list[tuple[socket.socket, Path]] = []  # what serve() opened, for stop()
+
+
 def serve(on_toggle: Callable[[Mode], None]) -> None:
     """Start a background listener; each `qal-scribe toggle [--translate]` calls on_toggle(mode)."""
     path = socket_path()
     _private_dir(path.parent)
     srv = _bind(path)
+    _servers.append((srv, path))
     threading.Thread(target=_accept_loop, args=(srv, on_toggle), daemon=True, name="qal-scribe-ipc").start()
+
+
+def stop() -> None:
+    """Close the listener and remove the socket file, so the next start finds no stale socket."""
+    while _servers:
+        srv, path = _servers.pop()
+        srv.close()
+        path.unlink(missing_ok=True)
 
 
 def send_toggle(mode: Mode = "dictate") -> int:

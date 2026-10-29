@@ -210,7 +210,7 @@ def test_neighbouring_numbers_that_form_one_number_merge(a, b):
     [
         ("ሦስት", "3"), ("አሥር", "10"), ("ዐሥር", "10"), ("አሥራ ሁለት", "12"), ("ሀያ", "20"), ("ሐያ", "20"), ("ሓያ", "20"),
         ("ሀምሳ", "50"), ("ሰላሣ", "30"), ("ሥልሳ", "60"), ("ሰማኒያ", "80"), ("ሚሊየን", "1000000"),
-        ("ቢሊየን", "1000000000"), ("ሺሕ", "1000"),
+        ("ቢሊየን", "1000000000"), ("ሺሕ", "1000"), ("ስድሳ", "60"), ("ስድሳ አምስት", "65"),
     ],
 )
 def test_spelling_variants(variant, digits):
@@ -389,11 +389,21 @@ def test_comma_rule_skips_the_noun_after_a_demonstrative():
         text = f"{demonstrative} ነገር ግን ጥሩ ነው"
         assert add_punctuation(text) == text + "።"
     assert add_punctuation("ከሰይህ ነገር ግን ጥሩ ነው") == "ከሰይህ፣ ነገር ግን ጥሩ ነው።"  # ይህ only as a whole word
+    for text in ("አንድ ነገር ግን ልንገርህ", "ሌላ ነገር ግን አለ", "1 ነገር ግን ቀረ"):
+        assert add_punctuation(text) == text + "።"
 
 
 def test_maybe_written_as_two_words_is_not_a_question():
     assert add_punctuation("ምን አልባት ይመጣል") == "ምን አልባት ይመጣል።"
     assert add_punctuation("ምን አልባት ማን መጣ") == "ምን አልባት ማን መጣ?"
+    assert add_punctuation("ምን አልባትም ይመጣል") == "ምን አልባትም ይመጣል።"
+
+
+def test_question_word_heading_a_reported_clause_is_a_statement():
+    for text in ("ምን እንደምትፈልግ ንገረኝ", "ማን እንደመጣ ንገረኝ", "ምን ማድረግ እንዳለብኝ አስረዳኝ"):
+        assert add_punctuation(text) == text + "።"
+    assert add_punctuation("እንዴት እንደዚህ ሆነ") == "እንዴት እንደዚህ ሆነ?"  # እንደዚህ is "like this", not a verb
+    assert add_punctuation("እንደ ልማዱ ማን መጣ") == "እንደ ልማዱ ማን መጣ?"  # እንደ before the question word
 
 
 def test_documented_wrong_marks():  # pinned so a change to the rules is a conscious one

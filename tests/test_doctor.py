@@ -63,15 +63,39 @@ def test_config_problem_negative_restore_delay():
 
 def test_microphone(monkeypatch):
     sd = pytest.importorskip("sounddevice")
-    monkeypatch.setattr(sd, "query_devices", lambda kind: {"name": "Fake mic"})
+    monkeypatch.setattr(sd, "query_devices", lambda device=None, kind=None: {"name": "Fake mic"})
     assert doctor.check_microphone().detail == "Fake mic"
 
-    def none(kind):
+    def none(device=None, kind=None):
         raise sd.PortAudioError("Error querying device -1")
 
     monkeypatch.setattr(sd, "query_devices", none)
     mic = doctor.check_microphone()
     assert mic.status == "fail" and "microphone" in mic.fix
+
+
+def test_configured_microphone_is_resolved_like_the_recorder_does(monkeypatch):
+    sd = pytest.importorskip("sounddevice")
+    devices = [{"name": "MacBook Pro Microphone", "max_input_channels": 1},
+               {"name": "MacBook Pro Speakers", "max_input_channels": 0},
+               {"name": "USB Mic", "max_input_channels": 2}]
+
+    def query(device=None, kind=None):
+        if device is None and kind is None:
+            return devices
+        if isinstance(device, int):
+            return devices[device]
+        for d in devices:
+            if device in d["name"] and d["max_input_channels"]:
+                return d
+        raise ValueError(f"No input device matching {device!r}")
+
+    monkeypatch.setattr(sd, "query_devices", query)
+    assert doctor.check_microphone("USB").detail == "USB Mic"
+    assert doctor.check_microphone("2").detail == "USB Mic"  # a number in the config is a device index
+    mic = doctor.check_microphone("Yeti")
+    assert mic.status == "fail" and "Yeti" in mic.detail
+    assert "MacBook Pro Microphone, USB Mic" in mic.fix and "Speakers" not in mic.fix
 
 
 def test_paste_failure_shows_its_reason_as_the_fix(monkeypatch):

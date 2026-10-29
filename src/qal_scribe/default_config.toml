@@ -35,7 +35,8 @@
 # sounds = true
 
 # Microphone: part of its name (e.g. "MacBook Pro Microphone") or its number. Leave this line out to use the
-# system default (the default); `qal-scribe doctor` lists the microphones it can see.
+# system default (the default). `qal-scribe doctor` shows which one is used, and lists them all when the
+# name matches none.
 # mic = "MacBook Pro Microphone"
 
 # Show a live draft of the text while you are still speaking.

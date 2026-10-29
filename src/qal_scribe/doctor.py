@@ -97,15 +97,21 @@ def check_device(cfg: Config) -> Check:
     return Check("Compute device", "ok", detail)
 
 
-def check_microphone() -> Check:
+def check_microphone(mic: str | None = None) -> Check:
+    """The input `mic` (config) selects, as Recorder would resolve it; lists the inputs when it matches none."""
     try:
         import sounddevice as sd
     except OSError:  # PortAudio shared library missing
         return Check("Microphone", "fail", "PortAudio library not found", "Linux: sudo apt install libportaudio2")
+    device = int(mic) if mic and mic.isdigit() else mic
     try:
-        return Check("Microphone", "ok", sd.query_devices(kind="input")["name"])
+        return Check("Microphone", "ok", sd.query_devices(device, kind="input")["name"])
     except (sd.PortAudioError, ValueError):
-        return Check("Microphone", "fail", "no input device", "connect a microphone and make it the default input")
+        if not mic:
+            return Check("Microphone", "fail", "no input device", "connect a microphone and make it the default input")
+    inputs = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
+    return Check("Microphone", "fail", f"no input matches mic = {mic!r}",
+                 f"set mic to one of: {', '.join(inputs)}; or remove it" if inputs else "connect a microphone")
 
 
 def check_paste() -> Check:
@@ -168,7 +174,7 @@ def check_disk() -> Check:
 
 def run(path: Path) -> int:
     config_check, cfg = check_config(path)
-    checks = [check_system(), check_device(cfg), check_microphone(), check_paste(), check_input_monitoring(),
+    checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_paste(), check_input_monitoring(),
               config_check, *check_models(cfg), check_disk()]
     checks = [c for c in checks if c]
     table = Table(title="qal-scribe doctor", title_justify="left", header_style="bold")

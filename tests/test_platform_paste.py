@@ -40,6 +40,16 @@ def test_x11_types_with_xdotool(monkeypatch):
     assert box.calls == [("xdotool", ["type", "--clearmodifiers", "--", TEXT], None)]  # clipboard untouched
 
 
+def test_typing_timeout_grows_with_the_text(monkeypatch):
+    timeouts = []
+    Box(monkeypatch, {"xdotool"}, wayland=False)
+    monkeypatch.setattr(linux.subprocess, "run", lambda argv, **kw: timeouts.append(kw["timeout"]) or
+                        subprocess.CompletedProcess(argv, 0, b"", b""))
+    linux.paste("ሀ" * 10)
+    linux.paste("ሀ" * 1000)  # about a minute of dictation: xdotool needs far longer than the 5 s default
+    assert timeouts[0] < 6 and timeouts[1] >= 1000 * 0.012 * 2
+
+
 def test_wayland_types_with_wtype_even_if_ydotool_exists(monkeypatch):
     box = Box(monkeypatch, {"wtype", "ydotool", "wl-copy"}, wayland=True)
     assert "wtype" in linux.can_paste()[1]

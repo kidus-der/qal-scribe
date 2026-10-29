@@ -29,11 +29,13 @@ Punctuation (EXPERIMENTAL, rule-based, tuned to produce few wrong marks rather t
   4. A question has an interrogative word anywhere (ምን ማን የት መቼ እንዴት ስንት የትኛው ምንድነው ማነው ወይስ ይሆን, also with
      the prefixes በ ለ ከ የ ስለ እስከ: ለምን, ከየት, የማን) or ends with the particle ወይ or the tag አይደል. ምንም, ማንም,
      የትም, መቼም ("nothing", "anyone", "anywhere", "never") are different words and do not count.
-  5. Reported questions are statements: a sentence with a quotative (ብሎ ብዬ ...) or እንደሆነ/አላውቅም is not marked ?.
+  5. Reported questions are statements: a sentence with a quotative (ብሎ ብዬ ...) or እንደሆነ/አላውቅም is not marked ?,
+     nor one where an እንደ-/እንዳ- verb follows the question word (ምን እንደምትፈልግ ንገረኝ, "tell me what you want").
   6. The yes/no suffix -ን is deliberately not used: it also ends accusatives and every 1st person plural verb.
   7. A comma ፣ goes before the clause openers ነገር ግን, ሆኖም and ምክንያቱም when a word precedes them, unless that
-     word is a demonstrative (ይህ ነገር ግን ጥሩ ነው: "this thing, however", no comma after ይህ).
-  8. ምን አልባት (ምናልባት, "perhaps", split in two) is not a question word.
+     word makes ነገር the noun "thing": a demonstrative, አንድ, ሌላ, ምንም, ማንኛውም or a number (ይህ ነገር ግን ጥሩ ነው,
+     "this thing, however"; አንድ ነገር ግን ልንገርህ, "but let me tell you one thing").
+  8. ምን አልባት(ም) (ምናልባት, "perhaps", split in two) is not a question word.
 Known wrong marks: an exclamation built on an interrogative (እንዴት ደስ ይላል, "how nice") gets ? instead of ።, and a
 question without any interrogative word or ወይ/አይደል (መጣህን, ዛሬ ትመጣለህ) gets ።. Fix by hand or turn the flag off.
 """
@@ -87,7 +89,7 @@ _WORDS: dict[str, tuple[str, int]] = {
         (("u", 5), "አምስት"), (("u", 6), "ስድስት"), (("u", 7), "ሰባት"), (("u", 8), "ስምንት"), (("u", 9), "ዘጠኝ"),
         (("ten", 10), "አስር"), (("teen", 10), "አስራ"),
         (("tens", 20), "ሃያ"), (("tens", 30), "ሰላሳ"), (("tens", 40), "አርባ"), (("tens", 50), "ሃምሳ"),
-        (("tens", 60), "ስልሳ"), (("tens", 70), "ሰባ"), (("tens", 80), "ሰማንያ ሰማኒያ"), (("tens", 90), "ዘጠና"),
+        (("tens", 60), "ስልሳ ስድሳ"), (("tens", 70), "ሰባ"), (("tens", 80), "ሰማንያ ሰማኒያ"), (("tens", 90), "ዘጠና"),
         (("hun", 100), "መቶ"), (("scale", 10**3), "ሺህ ሺ"), (("scale", 10**6), "ሚሊዮን ሚሊየን ሚልዮን"),
         (("scale", 10**9), "ቢሊዮን ቢሊየን ቢልዮን"), (("scale", 10**12), "ትሪሊዮን ትሪሊየን"), (("point", 0), "ነጥብ"),
     ]
@@ -208,25 +210,36 @@ _FINAL_PARTICLES = frozenset({"ወይ", "አይደል"})
 _REPORTED = frozenset({"ብሎ", "ብላ", "ብለው", "ብዬ", "ብለህ", "ብለሽ", "ብለን", "እንደሆነ", "አላውቅም"})
 _ETHIOPIC_LETTER = re.compile("[ሀ-ፚ]")  # U+1200-U+135A, the syllables
 _SENTENCE_END = re.compile(r"[።?!፧…]")
-# the look-behinds skip a demonstrative that merely precedes the noun ነገር
-_CLAUSE_OPENER = re.compile(r"(?<=\w)(?<!\bይህ)(?<!\bያ)(?<!\bይሄ)(?<!\bይኸ) (?=(?:ነገር ግን|ሆኖም|ምክንያቱም)(?!\w))")
-_MAYBE = re.compile(r"(?<!\w)ምን አልባት(?!\w)")
+_CLAUSE_OPENER = re.compile(r"(\w+) (?=(?:ነገር ግን|ሆኖም|ምክንያቱም)(?!\w))")
+_THING = frozenset({"ይህ", "ያ", "ይሄ", "ይኸ", "አንድ", "ሌላ", "ምንም", "ማንኛውም"})  # then ነገር is the noun "thing"
+_MAYBE = re.compile(r"(?<!\w)ምን አልባትም?(?!\w)")
 
 
 def _is_wh(word: str) -> bool:
     return word in _WH or any(word.startswith(p) and word[len(p) :] in _WH for p in _WH_PREFIXES)
 
 
+def _reported_verb(word: str) -> bool:
+    return word.startswith(("እንደ", "እንዳ")) and not word.startswith(("እንደዚ", "እንደዛ"))  # not "like this/that"
+
+
 def _is_question(sentence: str) -> bool:
     words = re.findall(r"\w+", _MAYBE.sub(" ", sentence))
     if not words or _REPORTED.intersection(words):
         return False
-    return words[-1] in _FINAL_PARTICLES or any(_is_wh(w) for w in words)
+    wh = [i for i, w in enumerate(words) if _is_wh(w)]
+    if wh and any(_reported_verb(w) for w in words[wh[0] + 1 :]):
+        return False
+    return words[-1] in _FINAL_PARTICLES or bool(wh)
+
+
+def _comma(m: re.Match) -> str:
+    return m[0] if m[1] in _THING or m[1].isdigit() else f"{m[1]}፣ "
 
 
 def add_punctuation(text: str) -> str:
     text = text.strip()
     if not _ETHIOPIC_LETTER.search(text) or not re.search(r"\w$", text):
         return text
-    text = _CLAUSE_OPENER.sub("፣ ", text)
+    text = _CLAUSE_OPENER.sub(_comma, text)
     return text + ("?" if _is_question(_SENTENCE_END.split(text)[-1]) else "።")

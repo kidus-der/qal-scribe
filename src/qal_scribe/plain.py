@@ -1,4 +1,5 @@
 """`qal-scribe --plain`: line-based output for logs, scripts and terminals without TUI support."""
+import sys
 import threading
 
 from qal_scribe import events as ev
@@ -27,8 +28,13 @@ def run(cfg: Config) -> None:
         if line:
             print(line, flush=True)
 
-    Controller(cfg, emit).start()
+    controller = Controller(cfg, emit)
     try:
+        controller.start()
         threading.Event().wait()
     except KeyboardInterrupt:
-        print("bye")
+        print("bye", flush=True)
+    except (RuntimeError, ValueError) as e:  # already running, unknown mic: say it in one line
+        sys.exit(f"qal-scribe: {e}")
+    finally:
+        controller.stop()

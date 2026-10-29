@@ -12,6 +12,7 @@ import time
 from qal_scribe.hotkey import is_wayland
 
 TIMEOUT = 5
+PER_CHAR = 0.05  # typing backends: xdotool waits 12 ms per key, plus a keymap remap for every Fidel character
 COPIERS = {"wl-copy": ["wl-copy"], "xclip": ["xclip", "-selection", "clipboard"],
            "xsel": ["xsel", "--clipboard", "--input"]}
 CTRL_V = ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"]  # KEY_LEFTCTRL, KEY_V: layout independent
@@ -51,10 +52,10 @@ def can_paste() -> tuple[bool, str]:
     return False, f"cannot type text: install {need}. Until then the text is copied to the clipboard{clip}"
 
 
-def _run(argv: list[str], data: bytes | None = None) -> bool:
+def _run(argv: list[str], data: bytes | None = None, timeout: float = TIMEOUT) -> bool:
     # DEVNULL, not pipes: xclip and wl-copy fork into the background and would keep captured pipes open forever.
     try:
-        done = subprocess.run(argv, check=False, input=data, timeout=TIMEOUT,
+        done = subprocess.run(argv, check=False, input=data, timeout=timeout,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -86,10 +87,13 @@ def _ydotool_paste(text: str, restore_delay: float) -> bool:
 
 
 def _insert(backend: str, text: str, restore_delay: float) -> bool:
-    if backend == "wtype":
-        return _run(["wtype", "-"], text.encode())  # "-" reads stdin: no argv length or leading-dash problems
+    # shortcut: a typing backend killed at its timeout has typed part of the text, and the next backend then
+    # inserts all of it again; the timeout grows with the text so only a hung tool gets there.
+    typing_time = TIMEOUT + PER_CHAR * len(text)
+    if backend == "wtype":  # "-" reads stdin: no argv length or leading-dash problems
+        return _run(["wtype", "-"], text.encode(), typing_time)
     if backend == "xdotool":
-        return _run(["xdotool", "type", "--clearmodifiers", "--", text])
+        return _run(["xdotool", "type", "--clearmodifiers", "--", text], timeout=typing_time)
     return _ydotool_paste(text, restore_delay)
 
 

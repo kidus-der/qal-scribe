@@ -45,6 +45,7 @@ class Controller:
         self.words = load_words(cfg)
         self.translator = None
         self.recorder = self.hotkeys = None
+        self._mode: ev.Mode = "dictate"  # mode of the recording in progress
         self._clips: queue.Queue = queue.Queue()
         self._last_level = 0.0
         # _gpu: one model call at a time (final transcription, translation, language swap). A preview only runs
@@ -62,16 +63,17 @@ class Controller:
         return keys
 
     def start(self) -> None:
+        # Fail before the slow model load: an unknown `mic` (ValueError) or another running instance (RuntimeError).
+        self.recorder = Recorder(on_level=self._level, device=self.cfg.mic)
+        ipc.serve(self.toggle)
         self.engine.load(lambda m: self.emit(ev.Loading(m)))
         ok, reason = paste.can_paste()
         if not ok:
             self.emit(ev.Notice(reason, "warning"))
-        self.recorder = Recorder(on_level=self._level, device=self.cfg.mic)
         self.hotkeys = PushToTalk(self.keys(), self._start_recording, self._stop_recording)
         self.hotkeys.start()
         if self.hotkeys.reason:
             self.emit(ev.Notice(self.hotkeys.reason, "warning"))
-        ipc.serve(self.toggle)
         threading.Thread(target=self._worker, daemon=True).start()
         self.emit(self._ready())
 
@@ -87,9 +89,7 @@ class Controller:
         self._preview_stop.set()
         if self.hotkeys:
             self.hotkeys.stop()
-        stop_ipc = getattr(ipc, "stop", None)  # platform workstream; optional until it lands
-        if stop_ipc:
-            stop_ipc()
+        ipc.stop()
         if self.recorder and self.recorder.active:
             self.recorder.stop()
         self._clips.put(None)  # wakes the worker so it exits
@@ -131,6 +131,7 @@ class Controller:
             self.emit(ev.Level(min(1.0, rms * 4)))
 
     def _start_recording(self, mode: ev.Mode) -> None:
+        self._mode = mode
         self.recorder.start()
         if self.cfg.sounds:
             play_cue("start")
@@ -180,8 +181,14 @@ class Controller:
         self._clips.put((mode, audio))
 
     def toggle(self, mode: ev.Mode = "dictate") -> None:
-        """External trigger (Linux/Wayland `qal-scribe toggle`): start if idle, stop if recording."""
-        (self._stop_recording if self.recorder.active else self._start_recording)(mode)
+        """External trigger (Linux/Wayland `qal-scribe toggle`): start if idle, stop if recording. A stop keeps
+        the mode the recording started with, so `toggle --translate` then `toggle` still translates."""
+        if self.hotkeys is None:
+            raise RuntimeError("still loading the model; try again in a moment")  # the client prints this
+        if self.recorder.active:
+            self._stop_recording(self._mode)
+        else:
+            self._start_recording(mode)
 
     def _worker(self) -> None:
         while (clip := self._clips.get()) is not None and not self._stopped.is_set():

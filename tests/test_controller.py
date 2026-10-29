@@ -116,6 +116,37 @@ def test_ready_reports_whether_the_lm_is_active(monkeypatch, tmp_path):
                                                                               "Right Control": "translate"}
 
 
+def test_toggle_stop_keeps_the_mode_the_recording_started_with(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c.hotkeys = FakeHotkeys()
+    c.toggle("translate")
+    c.toggle()  # a plain `qal-scribe toggle` ends the translate recording
+    assert c._clips.get_nowait()[0] == "translate"
+    assert [e.mode for e in out if isinstance(e, ev.RecordingStopped)] == ["translate"]
+
+
+def test_toggle_while_loading_is_refused(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError, match="still loading"):
+        c.toggle()
+    assert not c.recorder.active
+
+
+def test_start_checks_mic_and_single_instance_before_loading_the_model(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    order = []
+
+    def second_instance(on_toggle):
+        order.append("serve")
+        raise RuntimeError("qal-scribe is already running")
+
+    monkeypatch.setattr(controller, "Recorder", lambda **kw: order.append("recorder") or FakeRecorder())
+    monkeypatch.setattr(controller.ipc, "serve", second_instance)
+    with pytest.raises(RuntimeError, match="already running"):
+        c.start()
+    assert order == ["recorder", "serve"] and c.hotkeys is None
+
+
 def test_recorder_snapshot_reads_without_stopping():
     r = Recorder.__new__(Recorder)
     r._chunks = []
