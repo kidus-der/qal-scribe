@@ -24,6 +24,7 @@ class Config:
     sounds: bool = True
     theme: str = "qal"
     compact: bool = False
+    preview: bool = True  # show a live draft while recording
 
 
 def load(path: Path | None = None) -> Config:

@@ -1,6 +1,7 @@
 """Microphone capture at 16 kHz mono.
 
 Contract: Recorder(on_level).start(); audio = recorder.stop() -> float32 numpy array (may be empty).
+recorder.snapshot() -> the same array so far, while still recording.
 on_level(rms) is called from the audio thread for each block; keep it cheap.
 """
 from collections.abc import Callable
@@ -30,6 +31,11 @@ class Recorder:
     def start(self) -> None:
         self._chunks.clear()
         self._stream.start()
+
+    def snapshot(self) -> np.ndarray:
+        """Audio captured so far, without stopping."""
+        chunks = list(self._chunks)  # the audio thread appends concurrently
+        return np.concatenate(chunks) if chunks else np.zeros(0, dtype="float32")
 
     def stop(self) -> np.ndarray:
         self._stream.stop()
