@@ -1,24 +1,27 @@
 """Amharic -> English with facebook/nllb-200-distilled-600M (workstream `translate`). Loaded lazily on first use.
 
-Contract: t = Translator(device); t.load(); t.translate(amharic_text) -> english_text
-Empty or whitespace-only text gives "" without loading anything. Long text is split into sentences (and, for
-text without punctuation, into chunks of MAX_WORDS words) and translated as one batch.
+Contract: t = Translator(device); t.load(); t.translate(amharic_text, language="amh") -> english_text
+`amharic_text` is a string or a list of sentences (the Controller cuts speech at pauses). Empty or whitespace-only
+text gives "" without loading anything. Long text is split into sentences (and, for text without punctuation, into
+chunks of MAX_WORDS words) and translated as one batch. `language` is a qal-scribe language code; one NLLB does not
+know (Sidaama, Wolaytta) raises ValueError.
 Licence: the model is CC-BY-NC-4.0 (non-commercial); see NOTICE.
 """
 import re
 
-SRC_LANG = "amh_Ethi"
+NLLB_CODES = {"amh": "amh_Ethi", "tir": "tir_Ethi", "orm": "gaz_Latn", "som": "som_Latn"}
+SRC_LANG = NLLB_CODES["amh"]
 TGT_LANG = "eng_Latn"
 # NLLB is trained on sentences; longer unpunctuated runs (raw ASR output) degrade or truncate.
-# shortcut: cuts at a word count, possibly mid-sentence; upgrade when the punctuation step is on by default.
+# Only the fallback for a stretch of speech without a pause: the Controller already cuts at pauses.
 MAX_WORDS = 40
 # Ethiopic full stop and question mark end a sentence even without a following space.
 _SENTENCE_END = re.compile(r"(?<=[።፧])\s*|(?<=[.!?])\s+")
 
 
-def split_sentences(text: str) -> list[str]:
+def split_sentences(text: str | list[str]) -> list[str]:
     chunks = []
-    for sentence in _SENTENCE_END.split(text):
+    for sentence in (s for t in ([text] if isinstance(text, str) else text) for s in _SENTENCE_END.split(t)):
         words = sentence.split()
         chunks += [" ".join(words[i : i + MAX_WORDS]) for i in range(0, len(words), MAX_WORDS)]
     return chunks
@@ -52,13 +55,17 @@ class Translator:
             self.device = "cpu"
             self.model = model.float().to("cpu")
 
-    def translate(self, text: str) -> str:
+    def translate(self, text: str | list[str], language: str = "amh") -> str:
+        if language not in NLLB_CODES:
+            raise ValueError(f"no translation model for language {language!r}; translation knows "
+                             f"{', '.join(NLLB_CODES)}")
         sentences = split_sentences(text)
         if not sentences:
             return ""
         self.load()
         import torch
 
+        self.tokenizer.src_lang = NLLB_CODES[language]
         batch = self.tokenizer(sentences, return_tensors="pt", padding=True, truncation=True, max_length=256)
         batch = batch.to(self.device)
         with torch.inference_mode():
@@ -66,6 +73,7 @@ class Translator:
                 **batch,
                 forced_bos_token_id=self.target_id,
                 num_beams=4,
+                no_repeat_ngram_size=4,  # ends the loops NLLB falls into on spoken numbers; chrF unchanged
                 max_length=None,  # the model's default of 200 would otherwise conflict with max_new_tokens
                 max_new_tokens=2 * batch["input_ids"].shape[1] + 16,  # English is longer than Amharic, not 2x
             )

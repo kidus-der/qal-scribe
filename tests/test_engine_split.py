@@ -75,3 +75,13 @@ def test_transcribe_joins_chunk_texts(monkeypatch):
     long = speech(70)
     assert e.transcribe(long).text == "ሰላም ሰላም ሰላም"
     assert e.transcribe(long[: SAMPLE_RATE]).text == ""
+
+
+def test_transcribe_sentences_decodes_each_stretch_between_pauses(monkeypatch):
+    monkeypatch.setattr(eng.Engine, "logits", lambda self, audio: audio)
+    monkeypatch.setattr(eng.decode, "split_pauses", lambda logits, processor: [logits[:10], logits[10:], logits[:0]])
+    monkeypatch.setattr(eng.decode, "decode", lambda logits, *_: f"w{len(logits)}" if len(logits) else "")
+    e = eng.Engine(eng.models.get("amh"))
+    result = e.transcribe(np.ones(25, dtype="float32"), sentences=True)
+    assert result.sentences == ("w10", "w15") and result.text == "w10 w15"
+    assert e.transcribe(np.ones(25, dtype="float32")).sentences == ()

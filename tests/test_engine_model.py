@@ -66,3 +66,10 @@ def test_preview_is_a_greedy_draft_of_the_end():
     e = loaded_engine()
     draft = e.preview(audio).text
     assert draft and normalize(draft).split()[-1] in normalize(e.transcribe(audio).text)
+
+
+def test_sentences_are_cut_at_pauses_with_the_real_tokenizer():
+    clip = load_clip(SHORT)
+    pause = np.zeros(int(0.8 * SAMPLE_RATE), dtype="float32")
+    r = loaded_engine().transcribe(np.concatenate([clip, pause, clip]), sentences=True)
+    assert len(r.sentences) >= 2 and " ".join(r.sentences) == r.text

@@ -39,6 +39,7 @@ from qal_scribe.tui.widgets import (
 )
 
 SEVERITY = {"info": "information", "warning": "warning", "error": "error"}
+NOTICE_STYLE = {"info": "$text", "warning": "bold $warning", "error": "bold $error"}
 
 
 def installed_languages(current: str) -> list[str]:
@@ -47,6 +48,8 @@ def installed_languages(current: str) -> list[str]:
     from qal_scribe.doctor import WEIGHT_FILES, is_cached
 
     return [c for c, s in models.MODELS.items() if c == current or is_cached(s.repo, s.revision, *WEIGHT_FILES)]
+
+
 PERCENT = re.compile(r"(\d{1,3})\s*%")
 HISTORY_LEGEND = "audio · compute   ✓ pasted  ✗ not pasted"
 
@@ -118,8 +121,11 @@ class QalApp(App):
         self.pending: list[ev.Mode] = []  # clips recorded but not yet transcribed, oldest first
         self.partial = ""
         self.last: ev.Transcribed | None = None
+        self.setup: list[ev.Notice] = []  # warnings from the start (hotkeys, paste): stay in the hero
+        self.flash: tuple[ev.Notice, float] | None = None  # compact mode's notice in the stage, and until when
         self.spin = 0
         self.quitting = False
+        self.clean_exit = True  # False when the controller's stop() left a model call running
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
@@ -185,10 +191,17 @@ class QalApp(App):
                 self.query_one(Meter).reset()
             case ev.Transcribed() as done:
                 await self.finish(done)
-            case ev.Notice(text, level, clip):
+            case ev.Notice(text, level, clip) as notice:
                 if clip and self.pending:  # a skipped or failed clip never produces Transcribed
                     self.pending.pop(0)
-                self.notify(text, severity=SEVERITY[level], timeout=10 if level == "error" else 5)
+                timeout = 10 if level == "error" else 5
+                if self.info is None:  # a setup problem: a 5 s toast is gone before anyone reads it
+                    self.setup.append(notice)
+                elif self.screen.has_class("-compact"):  # a toast would cover the pill and lose its first lines
+                    self.flash = notice, time.monotonic() + timeout
+                    self.set_timer(timeout, self.refresh_view)
+                else:
+                    self.notify(text, severity=SEVERITY[level], timeout=timeout)
         self.refresh_view()
 
     async def finish(self, done: ev.Transcribed) -> None:
@@ -288,7 +301,14 @@ class QalApp(App):
         verbs = {"dictate": "dictate Amharic", "translate": "translate to English"}
         lines = [Content.assemble("Hold ", (key, "bold $accent"), f" to {verbs[mode]}")
                  for key, mode in self.hotkeys.items()]
-        return Content("\n").join([*lines, Content("Release to paste at your cursor.")])
+        if lines:
+            lines.append(Content("Release to paste at your cursor."))
+        else:  # no global hotkeys here (Wayland)
+            lines = [Content.assemble("Run ", ("qal-scribe toggle", "bold $accent"), " (bound to a key) to start "
+                                      "and stop"),
+                     Content.assemble(("qal-scribe toggle --translate", "bold $accent"), " for English")]
+        notes = [Content.styled(n.message, NOTICE_STYLE[n.level]) for n in self.setup]
+        return Content("\n").join([*notes, *lines])
 
     def refresh_view(self) -> None:
         if not self.is_running:  # shutting down: the timer or a late event can fire after widgets are removed
@@ -296,6 +316,7 @@ class QalApp(App):
         state = self.state
         for s in STATES:
             self.screen.set_class(s == state, f"-{s}")
+        self.screen.set_class(bool(self.setup), "-notes")
         top = self.query_one(TopBar)
         top.set_pill(self.pill_label())
         top.set_status(self.status_line(), f" · mic {self.mic}" if self.info and self.mic else "")
@@ -305,15 +326,20 @@ class QalApp(App):
         compact = self.screen.has_class("-compact")
         stage.border_title = self.stage_title(state)
         stage.border_subtitle = self.stage_subtitle()
+        if self.flash and time.monotonic() >= self.flash[1]:
+            self.flash = None
         if self.rec_mode:
             stage.show_transcript(self.partial or "listening…", live=True)
-        elif self.last and not self.last.text and state in ("ready", "transcribing", "translating"):
+        elif compact and self.flash:
+            notice = self.flash[0]
+            stage.show_hero(Content.styled(notice.message, NOTICE_STYLE[notice.level]), big=False)
+        elif self.last and not self.last.text and state == "ready":  # a clip in flight shows "Transcribing…"
             stage.show_transcript("(nothing recognised)", empty=True)
-        elif self.last and state in ("ready", "transcribing", "translating"):
+        elif self.last and state == "ready":
             not_pasted = compact and not self.last.pasted  # compact has no border for the subtitle that says so
             stage.show_transcript(self.last.text + ("  ✗ not pasted" if not_pasted else ""))
         else:
-            stage.show_hero(self.hero(), big=not compact)
+            stage.show_hero(self.hero(), big=not (compact or self.setup))
         history = self.query_one(ListView)
         history.display = bool(len(history))
         self.query_one("#history-empty").display = not len(history)
@@ -336,8 +362,8 @@ class QalApp(App):
 
     def stage_subtitle(self) -> str:
         if self.rec_mode:
-            key = next((k for k, m in self.hotkeys.items() if m == self.rec_mode), "key")
-            return f"release {key} to finish"
+            key = next((k for k, m in self.hotkeys.items() if m == self.rec_mode), None)
+            return f"release {key} to finish" if key else "run `qal-scribe toggle` again to finish"
         if self.pending:
             return self.loading_message
         if self.last and self.state == "ready":
@@ -401,13 +427,17 @@ class QalApp(App):
         self.quitting = True
         self.refresh_view()
         stop = getattr(self.controller, "stop", None)
-        self.run_worker(stop or (lambda: None), thread=True, name="stop", group="stop", exit_on_error=False)
+
+        def stop_controller() -> None:
+            self.clean_exit = (stop() is not False) if stop else True
+
+        self.run_worker(stop_controller, thread=True, name="stop", group="stop", exit_on_error=False)
 
 
 def run(cfg: Config) -> None:
     app = QalApp(cfg)
     app.run()
-    if app.boot_thread and app.boot_thread.is_alive():
-        # shortcut: quitting mid-download; skip interpreter teardown so torch/requests threads cannot abort it
+    if (app.boot_thread and app.boot_thread.is_alive()) or not app.clean_exit:
+        # shortcut: quitting mid-download or mid model call; Python would join their (download) threads first
         sys.stdout.flush()
         os._exit(0)

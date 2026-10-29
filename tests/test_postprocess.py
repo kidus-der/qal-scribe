@@ -285,6 +285,22 @@ def test_prepositions_stay_attached(spoken, written):
     assert numbers_to_digits(spoken) == written
 
 
+@pytest.mark.parametrize(
+    ("spoken", "written"),
+    [
+        ("በሺህ ዘጠኝ መቶ ስልሳ ሶስት", "በ1963"), ("በሺህ ዘጠኝ መቶ ሰባ ስድስት ዓ.ም", "በ1976 ዓ.ም"),  # "in 1963"
+        ("አርባ አምስቱ", "45ቱ"), ("ከመቶ አስራ ሰባቱ", "ከ117ቱ"), ("ዘጠኝ መቶ ዘጠና ዘጠኙ", "999ኙ"),  # "the 45"
+        ("ሁለቱ ልጆች", "ሁለቱ ልጆች"), ("ከሁለቱ", "ከሁለቱ"), ("በሚሊዮን የሚቆጠሩ", "በሚሊዮን የሚቆጠሩ"),  # words
+    ],
+)
+def test_years_after_be_and_the_definite_ending(spoken, written):
+    assert numbers_to_digits(spoken) == written
+
+
+def test_a_lone_prefix_letter_is_left_alone():  # the ASR writes them: የ ሁለት
+    assert numbers_to_digits("የ ሁለት በ ከ") == "የ 2 በ ከ"
+
+
 def test_percent_is_not_read_as_by_hundred():
     assert numbers_to_digits("ሃያ በመቶ") == "20 በመቶ"
     assert numbers_to_digits("በመቶ") == "በመቶ"

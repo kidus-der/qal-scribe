@@ -3,7 +3,9 @@
 Contract: PushToTalk({"alt_r": "dictate", "ctrl_r": "translate"}, on_start(mode), on_stop(mode)).start()
 Only one key records at a time; on_start/on_stop run on pynput's thread and must return quickly.
 `reason` is a user-facing sentence when global keys cannot work here (Wayland, no X display, macOS Input
-Monitoring off); the UI shows it. pynput is only imported when it can work, so this module imports anywhere.
+Monitoring off); the UI shows it. `listening` is False when no key will ever be heard (Wayland, no pynput, a
+listener that failed to start): `qal-scribe toggle` is then the only way to record.
+pynput is only imported when it can work, so this module imports anywhere.
 """
 import os
 import sys
@@ -24,8 +26,9 @@ def key_label(name: str) -> str:
 
 
 def is_wayland() -> bool:
+    # A compositor started from a console (sway) has XDG_SESSION_TYPE=tty, and DISPLAY too when XWayland runs.
     env = os.environ
-    return env.get("XDG_SESSION_TYPE") == "wayland" or bool(env.get("WAYLAND_DISPLAY") and not env.get("DISPLAY"))
+    return env.get("XDG_SESSION_TYPE") == "wayland" or bool(env.get("WAYLAND_DISPLAY"))
 
 
 def input_monitoring_denied() -> bool:
@@ -66,6 +69,10 @@ class PushToTalk:
             self._held = None
             self._on_stop(self._keys[key])
 
+    @property
+    def listening(self) -> bool:
+        return self._listener is not None
+
     def start(self) -> None:
         if self._listener is None:
             return
@@ -73,6 +80,7 @@ class PushToTalk:
             self._listener.start()
         except Exception as e:  # noqa: BLE001 - e.g. the X server refuses the connection
             self.reason = f"global hotkeys failed to start ({type(e).__name__}: {e}); use `qal-scribe toggle`"
+            self._listener = None
 
     def stop(self) -> None:
         if self._listener is not None:

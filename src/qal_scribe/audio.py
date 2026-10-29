@@ -3,7 +3,8 @@
 Contract: Recorder(on_level, device=None).start(); audio = recorder.stop() -> float32 numpy array (may be empty).
 recorder.snapshot() -> the same array so far, while still recording.
 device is a name (substring match), an index, or None for the system default (cfg.mic); ValueError when it cannot
-be opened (no match, out of range, output-only).
+be opened (no match, out of range, output-only). A mic that was unplugged is found again: start() retries once on
+a fresh device list, and a clip of only zeros makes the next start() use a fresh one.
 on_level(rms) is called from the audio thread for each block; keep it cheap.
 play_cue(kind) never blocks, never raises, and does nothing when there is no output device.
 """
@@ -23,18 +24,33 @@ CUES = {"start": (660, 880), "stop": (880, 660), "error": (220, 165)}  # Hz: ris
 
 class Recorder:
     def __init__(self, on_level: Callable[[float], None] | None = None, device: str | int | None = None):
-        import sounddevice as sd
-
         if isinstance(device, str) and device.isdigit():
             device = int(device)  # a config file can only say "2"
+        self._device = device
         self._chunks: list[np.ndarray] = []
         self._on_level = on_level
+        self._stream = self._open()
+
+    def _open(self):
+        import sounddevice as sd
+
         try:
-            self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", device=device,
-                                          callback=self._callback)
+            return sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", device=self._device,
+                                  callback=self._callback)
         except sd.PortAudioError as e:  # a number out of range or an output-only device; numbers shift with USB/BT
-            which = "the default microphone" if device is None else f"microphone {device!r}"
+            which = "the default microphone" if self._device is None else f"microphone {self._device!r}"
             raise ValueError(f"cannot open {which}: {e}; `qal-scribe doctor` lists the inputs") from e
+
+    def _reopen(self) -> None:
+        """PortAudio lists the devices once, at import, and a stream keeps the device it was opened on: only a
+        fresh list and a new stream reach a mic plugged in since, or the new default after one was unplugged."""
+        import sounddevice as sd
+
+        with _play_lock:  # no sound cue may be using PortAudio while it restarts
+            self._stream.close()
+            sd._terminate()
+            sd._initialize()
+        self._stream = self._open()
 
     def _callback(self, data, frames, time_info, status) -> None:
         self._chunks.append(data[:, 0].copy())
@@ -46,8 +62,14 @@ class Recorder:
         return self._stream.active
 
     def start(self) -> None:
+        import sounddevice as sd
+
         self._chunks.clear()
-        self._stream.start()
+        try:
+            self._stream.start()
+        except sd.PortAudioError:  # the mic is gone: one more try on a fresh device list
+            self._reopen()
+            self._stream.start()
 
     def snapshot(self) -> np.ndarray:
         """Audio captured so far, without stopping."""
@@ -56,7 +78,11 @@ class Recorder:
 
     def stop(self) -> np.ndarray:
         self._stream.stop()
-        return np.concatenate(self._chunks) if self._chunks else np.zeros(0, dtype="float32")
+        audio = np.concatenate(self._chunks) if self._chunks else np.zeros(0, dtype="float32")
+        if not audio.any():  # not even room noise: the mic may have gone away during the clip
+            with contextlib.suppress(Exception):  # start() reports a mic that cannot be opened
+                self._reopen()
+        return audio
 
 
 @functools.cache

@@ -42,7 +42,8 @@ def fake_pynput(monkeypatch, start_error=None):
     [
         ({"XDG_SESSION_TYPE": "wayland", "DISPLAY": ":0"}, True),  # XWayland does not see global keys
         ({"WAYLAND_DISPLAY": "wayland-0"}, True),
-        ({"WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"}, False),
+        ({"WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"}, True),  # sway from a console, XWayland running
+        ({"XDG_SESSION_TYPE": "tty", "WAYLAND_DISPLAY": "wayland-1", "DISPLAY": ":0"}, True),
         ({"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}, False),
         ({}, False),
     ],
@@ -58,7 +59,7 @@ def test_wayland_never_touches_pynput_and_explains(monkeypatch):
     keys = hotkey.PushToTalk({"alt_r": "dictate"}, lambda m: None, lambda m: None)
     keys.start()
     keys.stop()
-    assert "qal-scribe toggle" in keys.reason and "--translate" in keys.reason
+    assert "qal-scribe toggle" in keys.reason and "--translate" in keys.reason and not keys.listening
 
 
 def test_no_x_display_sets_reason(monkeypatch):
@@ -66,7 +67,7 @@ def test_no_x_display_sets_reason(monkeypatch):
     monkeypatch.setitem(sys.modules, "pynput", None)
     keys = hotkey.PushToTalk({"alt_r": "dictate"}, lambda m: None, lambda m: None)
     keys.start()
-    assert "unavailable" in keys.reason and "qal-scribe toggle" in keys.reason
+    assert "unavailable" in keys.reason and "qal-scribe toggle" in keys.reason and not keys.listening
 
 
 def test_listener_failing_to_start_sets_reason(monkeypatch):
@@ -74,7 +75,7 @@ def test_listener_failing_to_start_sets_reason(monkeypatch):
     fake_pynput(monkeypatch, start_error=RuntimeError("cannot connect to X server"))
     keys = hotkey.PushToTalk({"alt_r": "dictate"}, lambda m: None, lambda m: None)
     keys.start()
-    assert "failed to start" in keys.reason and "cannot connect" in keys.reason
+    assert "failed to start" in keys.reason and "cannot connect" in keys.reason and not keys.listening
 
 
 def test_macos_input_monitoring_reason(monkeypatch):
@@ -83,7 +84,7 @@ def test_macos_input_monitoring_reason(monkeypatch):
     monkeypatch.setattr(hotkey, "input_monitoring_denied", lambda: True)
     keys = hotkey.PushToTalk({"alt_r": "dictate"}, lambda m: None, lambda m: None)
     keys.start()
-    assert "Input Monitoring" in keys.reason and keys._listener.started
+    assert "Input Monitoring" in keys.reason and keys._listener.started and keys.listening
 
 
 def test_input_monitoring_check_uses_quartz(monkeypatch):

@@ -149,18 +149,74 @@ def test_first_run_download_failure_is_friendly_before_the_ui_starts(monkeypatch
 
 
 def test_models_are_fetched_before_the_ui_only_when_missing(monkeypatch, hf_cache):
+    from qal_scribe.translate import Translator
+
     spec = models.MODELS["amh"]
     downloads, started = [], []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: downloads.append(with_lm))
+    monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
     monkeypatch.setattr("qal_scribe.app.run", started.append)
     cli.main([])
-    assert downloads == [True] and len(started) == 1  # nothing cached
+    assert downloads == [True, "nllb"] and len(started) == 1  # nothing cached
     hf_cache(spec.repo, spec.revision, "model.safetensors")
+    hf_cache(Translator.MODEL, Translator.REVISION, "pytorch_model.bin")
     cli.main([])
-    assert downloads == [True, True]  # the language model is still missing
+    assert downloads == [True, "nllb", True]  # the language model is still missing
     hf_cache(spec.repo, spec.revision, spec.lm_file)
     cli.main([])
-    assert downloads == [True, True] and len(started) == 3
+    assert downloads == [True, "nllb", True] and len(started) == 3
+
+
+def test_no_translate_key_means_no_translation_download(monkeypatch, tmp_path):
+    downloads = []
+    monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
+    monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
+    monkeypatch.setattr("qal_scribe.app.run", lambda cfg: None)
+    path = tmp_path / "config.toml"
+    path.write_text('translate_key = ""\n')
+    cli.main(["--config", str(path)])
+    assert downloads == []
+
+
+def test_a_failed_translation_download_still_starts_dictation(monkeypatch, capsys):
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    def offline():
+        raise LocalEntryNotFoundError("cannot reach the Hub")
+
+    started = []
+    monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
+    monkeypatch.setattr(cli, "download_translation", offline)
+    monkeypatch.setattr("qal_scribe.app.run", started.append)
+    cli.main([])
+    err = capsys.readouterr().err
+    assert len(started) == 1 and "cannot reach the Hub" in err and "models download --translation" in err
+
+
+def test_downloads_let_ctrl_c_through_and_restore_the_handler(monkeypatch):
+    import signal
+
+    seen = []
+    monkeypatch.setattr(models, "download", lambda spec, with_lm=False: seen.append(signal.getsignal(signal.SIGINT)))
+    before = signal.getsignal(signal.SIGINT)
+    cli.main(["models", "download"])
+    assert seen == [signal.SIG_DFL] and signal.getsignal(signal.SIGINT) is before
+
+
+def test_bad_device_or_words_file_stops_before_the_model_loads(tmp_path, monkeypatch):
+    def no_download(spec, with_lm=False):
+        raise AssertionError("downloaded")
+
+    monkeypatch.setattr(models, "download", no_download)
+    path = tmp_path / "config.toml"
+    path.write_text('device = "gpu"\n')
+    assert "device 'gpu' is not available here" in exit_message(["--config", str(path), "--plain"])
+    words = tmp_path / "words.txt"
+    words.write_text("ኤፒአይ => API\n", encoding="utf-16")
+    path.write_text(f'words_file = "{words}"\n')
+    for argv in (["--plain"], ["transcribe", write_wav(tmp_path / "a.wav", 16000)]):
+        message = exit_message(["--config", str(path), *argv])
+        assert "bad config" in message and "words.txt: not UTF-8" in message and "Traceback" not in message
 
 
 def test_plain_format_says_when_recording_starts_and_stops():
@@ -230,9 +286,9 @@ def fake_engine(monkeypatch, hf_cache):
         def load(self, on_progress=None):
             pass
 
-        def transcribe(self, audio):
+        def transcribe(self, audio, sentences=False):
             heard.append(np.asarray(audio))
-            return engine.Result("ሞዴል ይሰራል", 0.1)
+            return engine.Result("ሞዴል ይሰራል", 0.1, ("ሞዴል", "ይሰራል") if sentences else ())
 
     monkeypatch.setattr(engine, "Engine", Engine)
     monkeypatch.setattr(cli, "quiet_progress_bars", lambda: None)  # process-wide; keep it out of other tests
@@ -277,8 +333,20 @@ def test_transcribe_says_on_stderr_when_it_downloads_first(tmp_path, capsys, mon
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: downloads.append(spec.language))
     monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
     monkeypatch.setattr("qal_scribe.translate.Translator.load", lambda self: None)
-    monkeypatch.setattr("qal_scribe.translate.Translator.translate", lambda self, text: "it works")
+    asked = []
+    monkeypatch.setattr("qal_scribe.translate.Translator.translate",
+                        lambda self, text, language: asked.append((text, language)) or "it works")
     cli.main(["transcribe", "--translate", write_wav(tmp_path / "a.wav", 16000)])
     captured = capsys.readouterr()
-    assert downloads == ["nllb"] and captured.out == "it works\n"
-    assert "First translation: fetching facebook/nllb-200-distilled-600M" in captured.err
+    assert downloads == ["nllb"] and captured.out == "it works\n" and asked == [(["ሞዴል", "ይሰራል"], "amh")]
+    assert "fetching the translation model facebook/nllb-200-distilled-600M" in captured.err
+
+
+@pytest.mark.parametrize(("platform", "tool"), [("darwin", "afconvert -f WAVE -d LEI16@16000 -c 1 "),
+                                                ("linux", "ffmpeg -i ")])
+def test_transcribe_an_unreadable_file_suggests_a_converter_that_is_there(tmp_path, monkeypatch, platform, tool):
+    memo = tmp_path / "New Recording 3.m4a"
+    memo.write_bytes(b"\x00\x00\x00\x20ftypM4A " + bytes(64))  # what Voice Memos saves; libsndfile cannot read it
+    monkeypatch.setattr(sys, "platform", platform)
+    message = exit_message(["transcribe", str(memo)])
+    assert f"Convert it with: {tool}'{memo}'" in message

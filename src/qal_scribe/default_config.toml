@@ -8,7 +8,7 @@
 # Push-to-talk keys: hold to record, release to paste. Use pynput key names such as alt_r (Right Option),
 # ctrl_r (Right Control), cmd_r, shift_r, alt_l or f13.
 # dictate_key = "alt_r"
-# Speech to English text. Set to "" to turn this key off.
+# Speech to English text. Set to "" to turn this key off; the translation model (2.5 GB) is then never fetched.
 # translate_key = "ctrl_r"
 
 # Where the model runs: "mps" (Apple GPU), "cuda" or "cpu". Leave this line out to use the fastest one

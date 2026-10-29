@@ -4,11 +4,12 @@ On-device push-to-talk dictation for Amharic. Hold a key, speak, let go: the tex
 A second key turns Amharic speech into English text. Everything runs on your computer; after the models are
 downloaded nothing leaves it.
 
-- **macOS** (Apple Silicon or Intel) is the main platform. **Linux** works and is in beta.
+- **macOS** on Apple Silicon is the main platform (Intel Macs are not supported: PyTorch no longer builds for
+  them). **Linux** works and is in beta.
 - Speech model: [snapwre/hohe-asr-amharic](https://huggingface.co/snapwre/hohe-asr-amharic) (wav2vec2-BERT 600M,
   CC-BY-4.0), decoded with its KenLM language model. On an Apple GPU a 10 s clip takes about 0.15 s.
 - Translation: [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)
-  (CC-BY-NC-4.0: **non-commercial use only**), downloaded the first time you use it.
+  (CC-BY-NC-4.0: **non-commercial use only**).
 
 ## Install
 
@@ -20,14 +21,19 @@ qal-scribe doctor      # checks permissions, microphone and models, and says how
 qal-scribe             # hold Right Option, speak, release
 ```
 
-The first start downloads the speech model and its language model (about 3 GB); later starts work offline.
-`qal-scribe models download --translation` fetches the translation model (2.5 GB) up front.
+The first start downloads the speech model and its language model (about 3 GB), then the translation model
+(2.5 GB); later starts work offline. Ctrl+C cancels a download (the next start begins it again). To skip the
+translation model, set `translate_key = ""` in the config before the first start. `qal-scribe models download
+[--translation]` fetches the models without starting.
 
 On Linux without an NVIDIA GPU, install the CPU build of PyTorch instead of the multi-GB CUDA one:
 
 ```sh
 uv tool install --python 3.12 qal-scribe --torch-backend cpu
 ```
+
+uv does not remember `--torch-backend`, so upgrade with the same line plus `--upgrade` rather than with
+`uv tool upgrade`, which may fetch the multi-GB CUDA build.
 
 `--python 3.12` matters: the language-model decoder has no builds for newer Pythons, and without it qal-scribe
 falls back to slightly less accurate greedy decoding (`qal-scribe doctor` warns about it). uv downloads Python 3.12
@@ -51,6 +57,9 @@ System Settings > Privacy & Security, then quit and reopen the terminal:
 | Hold **Right Option**, speak, release | Amharic text is pasted at your cursor |
 | Hold **Right Control**, speak, release | The English translation is pasted |
 
+Translation goes sentence by sentence, and the speech model writes no punctuation, so qal-scribe takes a pause of
+half a second as the end of a sentence: pause briefly between sentences when you translate.
+
 Pasting goes through the clipboard: qal-scribe saves what you had copied and puts it back half a second later.
 While you speak, a live draft appears in the window (turn it off with `preview = false`).
 
@@ -64,7 +73,16 @@ you said. Its keys: `c` copies the last text, `Enter` copies the highlighted his
 Text is typed with `wtype` (Wayland: sway, Hyprland, ...), `xdotool` (X11) or, on GNOME and KDE Wayland,
 pasted with `wl-copy` + `ydotool` (needs `ydotoold` running; terminals want Ctrl+Shift+V, so pasting into a
 terminal does not work there). Without any of them the text goes to the clipboard and the window says so.
-`qal-scribe doctor` tells you what to install. You also need PortAudio (`sudo apt install libportaudio2`).
+`qal-scribe doctor` tells you what to install.
+
+Before `uv tool install`, install PortAudio and the tools to build `evdev` (a keyboard library that has no
+ready-made build for Linux):
+
+```sh
+sudo apt install libportaudio2 build-essential python3-dev      # Debian, Ubuntu
+sudo dnf install portaudio gcc python3-devel kernel-headers      # Fedora
+sudo pacman -S portaudio base-devel                             # Arch
+```
 
 Wayland does not let programs read global hotkeys, so bind two keys in your compositor or desktop settings to:
 
@@ -118,19 +136,21 @@ homophone letters and drops punctuation):
 | Decoding | CER | WER |
 |---|---|---|
 | greedy (the model alone) | 6.5 % | 17.2 % |
-| with the language model (default) | 6.0 % | 14.6 % |
+| with the language model (default) | 6.0 % | 14.4 % |
+| language model and `numbers_to_digits = true` | 4.5 % | 13.1 % |
 
-The language model removes about one word error in seven and adds about 10 ms per clip. These numbers are for
-read speech; expect more errors with background noise, fast speech, names and English words (add those to your
-words file).
+The language model removes about one word error in six and adds about 11 ms per clip. The FLEURS transcripts
+write numbers as digits, which is why `numbers_to_digits` scores better here; it stays off by default because of
+the traps described above. These numbers are for read speech; expect more errors with background noise, fast
+speech, names and English words (add those to your words file).
 
 ## More languages (experimental)
 
 Tigrinya (`tir`), Afaan Oromo (`orm`), Somali (`som`), Sidaama (`sid`) and Wolaytta (`wal`) run through the same
 engine with other open models. They are rough drafts at best: see [docs/languages.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/languages.md) for
 their accuracy and licences (the Somali model is non-commercial). Download one with
-`qal-scribe models download tir`, then press `l` in the window or set `language = "tir"`. Translation and the
-text clean-up settings are made for Amharic.
+`qal-scribe models download tir`, then press `l` in the window or set `language = "tir"`. Translation was only
+measured from Amharic (NLLB has no Sidaama or Wolaytta), and the text clean-up settings are made for Amharic.
 
 ## Commands
 
@@ -140,7 +160,7 @@ qal-scribe --plain             the same, one line per event
 qal-scribe doctor              check permissions, microphone, device, config and models
 qal-scribe models              list languages and whether each model is downloaded
 qal-scribe models download [LANG] [--translation]
-qal-scribe transcribe FILE [--translate]       an audio file (wav, flac, ogg, mp3) to text
+qal-scribe transcribe FILE [--translate]       an audio file (wav, flac, ogg, mp3; convert m4a first) to text
 qal-scribe config [--init]     show (or create) the config file
 qal-scribe toggle [--translate]                start/stop recording in the running instance
 qal-scribe about               licences and model attribution

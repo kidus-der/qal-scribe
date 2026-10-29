@@ -32,10 +32,10 @@ class FakeEngine:
     def unload(self):
         self.unloaded = True
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, sentences=False):
         self.transcribing.set()
         time.sleep(self.transcribe_seconds)
-        return Result(" ሰላም   ዓለም ", self.transcribe_seconds)
+        return Result(" ሰላም   ዓለም ", self.transcribe_seconds, ("ሰላም", "ዓለም") if sentences else ())
 
     def preview(self, audio):
         self.preview_calls += 1
@@ -62,9 +62,19 @@ class FakeRecorder:
 
 class FakeHotkeys:
     stopped = False
+    listening = True
 
     def stop(self):
         self.stopped = True
+
+
+class FakeTranslator:
+    def __init__(self):
+        self.asked = []
+
+    def translate(self, sentences, language="amh"):
+        self.asked.append((sentences, language))
+        return "hello world"
 
 
 def make(monkeypatch, tmp_path, pasted=True, **engine_kw):
@@ -72,6 +82,8 @@ def make(monkeypatch, tmp_path, pasted=True, **engine_kw):
     out = []
     c = controller.Controller(cfg, out.append)
     c.engine, c.recorder = FakeEngine(models.get("amh"), **engine_kw), FakeRecorder()
+    c.loaded_translators = []
+    c._new_translator = lambda: c.loaded_translators.append(FakeTranslator()) or c.loaded_translators[-1]
     monkeypatch.setattr(controller.paste, "paste", lambda text, delay: pasted)
     monkeypatch.setattr(controller, "PREVIEW_INTERVAL", 0.01)
     return c, out
@@ -109,11 +121,71 @@ def test_words_file_parsing(tmp_path):
 
 def test_ready_reports_whether_the_lm_is_active(monkeypatch, tmp_path):
     c, _ = make(monkeypatch, tmp_path)
+    c.hotkeys = FakeHotkeys()
     assert c._ready().lm is False
     c.engine.lm = object()
     ready = c._ready()
     assert ready.lm is True and ready.language == "amh" and ready.hotkeys == {"Right Option": "dictate",
                                                                               "Right Control": "translate"}
+
+
+def test_ready_lists_no_keys_when_none_can_be_heard(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    c.hotkeys = FakeHotkeys()
+    c.hotkeys.listening = False  # Wayland: `qal-scribe toggle` is the only way
+    assert c._ready().hotkeys == {}
+
+
+def test_translate_mode_translates_the_sentences_between_pauses(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c.handle("translate", AUDIO)
+    (done,) = [e for e in out if isinstance(e, ev.Transcribed)]
+    assert done.text == "hello world" and done.mode == "translate" and done.pasted
+    assert c.translator.asked == [(["ሰላም", "ዓለም"], "amh")]
+
+
+def test_a_failed_translation_keeps_the_amharic_in_the_history(monkeypatch, tmp_path):
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    c, out = make(monkeypatch, tmp_path)
+    pastes = []
+    monkeypatch.setattr(controller.paste, "paste", lambda text, delay: pastes.append(text) or True)
+
+    def offline():
+        raise LocalEntryNotFoundError("Cannot find an appropriate cached snapshot folder")
+
+    c._new_translator = offline
+    c.handle("translate", AUDIO)
+    notice, done = out[-2:]
+    assert notice.level == "error" and not notice.clip and "models download --translation" in notice.message
+    assert (done.mode, done.text, done.pasted) == ("dictate", "ሰላም ዓለም", False) and pastes == []
+
+
+def test_the_translator_loads_while_the_translate_key_is_held(monkeypatch, tmp_path):
+    c, out = make(monkeypatch, tmp_path)
+    c.cfg.preview = False
+    c._start_recording("translate")
+    wait_for(lambda: c.translator is not None)
+    c._stop_recording("translate")
+    c.handle(*c._clips.get_nowait())
+    assert len(c.loaded_translators) == 1 and "Loading" not in kinds(out)  # no load after the release
+    c._start_recording("translate")  # already loaded: nothing more to do
+    c._stop_recording("translate")
+    assert len(c.loaded_translators) == 1
+
+
+def test_no_translator_preload_for_dictation_or_a_language_nllb_lacks(monkeypatch, tmp_path):
+    import dataclasses
+
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.preview = False
+    c._start_recording("dictate")
+    c._stop_recording("dictate")
+    c.spec = dataclasses.replace(c.spec, language="sid")
+    c._start_recording("translate")
+    c._stop_recording("translate")
+    time.sleep(0.05)
+    assert c.loaded_translators == []
 
 
 def test_toggle_stop_keeps_the_mode_the_recording_started_with(monkeypatch, tmp_path):
@@ -384,8 +456,9 @@ def test_stop_does_not_hang_on_a_stuck_model_call(monkeypatch, tmp_path):
     c, _ = make(monkeypatch, tmp_path)
     monkeypatch.setattr(controller, "STOP_WAIT", 0.05)
     with c._gpu:  # a model call that never ends
-        c.stop()
+        assert c.stop() is False  # the UI then skips joining its threads (os._exit)
     assert not c.engine.unloaded
+    assert c.stop() is True
 
 
 def test_stop_lets_a_paste_in_flight_restore_the_clipboard(monkeypatch, tmp_path):
@@ -470,7 +543,7 @@ def test_a_failed_stop_ends_the_clip_for_the_ui(monkeypatch, tmp_path):
 def test_notices_that_end_a_clip_say_so(monkeypatch, tmp_path):
     c, out = make(monkeypatch, tmp_path)
     c.handle("dictate", np.zeros(16000, dtype="float32"))
-    c.engine.transcribe = lambda audio: 1 / 0
+    c.engine.transcribe = lambda audio, sentences=False: 1 / 0
     worker = start_worker(c)
     c._clips.put(("dictate", AUDIO))
     wait_for(lambda: len(out) == 2)

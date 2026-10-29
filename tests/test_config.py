@@ -42,3 +42,18 @@ def test_numbers_may_be_whole(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text("restore_delay = 1\n")
     assert config.load(p).restore_delay == 1
+
+
+def test_words_file_with_a_bom_keeps_its_first_entry(tmp_path):
+    p = tmp_path / "words.txt"
+    p.write_text("ኤፒአይ => API\n", encoding="utf-8-sig")  # what Notepad's "UTF-8" writes
+    assert config.load_words(config.Config(words_file=p)) == {"ኤፒአይ": "API"}
+
+
+def test_words_file_that_is_not_utf8_or_not_a_file_names_itself(tmp_path):
+    p = tmp_path / "words.txt"
+    p.write_text("ኤፒአይ => API\n", encoding="utf-16")
+    with pytest.raises(ValueError, match=r"words\.txt: not UTF-8 text"):
+        config.load_words(config.Config(words_file=p))
+    with pytest.raises(ValueError, match=str(tmp_path)):
+        config.load_words(config.Config(words_file=tmp_path))  # a folder

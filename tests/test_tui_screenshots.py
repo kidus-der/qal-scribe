@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_tui import SAMPLE, done, drive, screen_text, send
+from test_tui import SAMPLE, SetupWarnings, done, drive, screen_text, send
 
 from qal_scribe import events as ev
 from qal_scribe.config import Config
@@ -12,6 +12,8 @@ from qal_scribe.config import Config
 SIZES = {"120x36": (120, 36), "80x24": (80, 24), "compact-80x5": (80, 5), "compact-40x3": (40, 3)}
 LONG = "ይህ ረጅም ዓረፍተ ነገር ነው ብዙ ቃላት ያሉት ሁለት መስመር የሚሞላ እና የሚቀጥል ለማየት ያህል ተጽፎ ዛሬ"
 HISTORY = ["እንኳን ደህና መጣህ", "አዲስ አበባ ዛሬ ፀሐያማ ናት።", LONG, SAMPLE]
+WARNING = ("could not start recording: PortAudioError: Error starting stream: Internal PortAudio error "
+           "[PaErrorCode -9986]; `qal-scribe doctor` checks the microphone")
 
 
 async def speak(pilot, mode="dictate", partial=SAMPLE):
@@ -37,6 +39,7 @@ SCENES = {
     "transcribing": lambda pilot: send(pilot, ev.RecordingStopped("dictate", 4.0)),
     "translating": lambda pilot: send(pilot, ev.RecordingStopped("translate", 4.0)),
     "transcript": fill_history,
+    "notice": lambda pilot: send(pilot, ev.Notice(WARNING, "error")),
 }
 
 
@@ -52,8 +55,24 @@ def test_screenshot(scene, size, tmp_path):
         assert screen_text(app).strip()
         app.save_screenshot(f"{scene}-{size}.svg", str(folder))
 
-    drive(scenario, size=SIZES[size], cfg=Config(compact=size.startswith("compact")))
+    drive(scenario, size=SIZES[size], cfg=Config(compact=size.startswith("compact")), notifications=True)
     assert (folder / f"{scene}-{size}.svg").stat().st_size > 5_000
+
+
+@pytest.mark.parametrize("size", SIZES)
+def test_setup_warnings_screenshot(size, tmp_path):
+    """Wayland: no hotkeys, and the warnings stay on screen instead of in 5 s toasts."""
+    folder = Path(os.environ.get("QAL_TUI_SHOTS", tmp_path))
+    folder.mkdir(parents=True, exist_ok=True)
+
+    async def scenario(app, fake, pilot):
+        await pilot.pause()
+        text = screen_text(app)
+        assert "Right Option" not in text and "READY" in text
+        app.save_screenshot(f"setup-warnings-{size}.svg", str(folder))
+
+    drive(scenario, size=SIZES[size], cfg=Config(compact=size.startswith("compact")), notifications=True,
+          factory=lambda c, e: SetupWarnings(c, e))
 
 
 def test_loading_screenshot(tmp_path):

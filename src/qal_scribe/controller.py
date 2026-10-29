@@ -2,7 +2,10 @@
 
 The UI (app.py or plain.py) constructs Controller(cfg, emit) and calls start(); emit is called from
 background threads, so UIs must hand events to their own thread (Textual: app.call_from_thread).
+stop() returns False when a model call was still running after STOP_WAIT: the UI should then end the process
+with os._exit, since Python would wait at exit for that call's threads (a model download, for one).
 """
+import contextlib
 import queue
 import threading
 import time
@@ -17,6 +20,7 @@ from qal_scribe.audio import SAMPLE_RATE, Recorder, play_cue
 from qal_scribe.config import load_words
 from qal_scribe.engine import Engine
 from qal_scribe.hotkey import PushToTalk, key_label
+from qal_scribe.translate import NLLB_CODES
 
 LEVEL_INTERVAL = 1 / 25  # throttle mic-level events to ~25/s
 PREVIEW_INTERVAL = 0.6  # pause between live previews while recording
@@ -67,13 +71,14 @@ class Controller:
         self.emit(self._ready())
 
     def _ready(self) -> ev.Ready:
+        keys = self.keys() if self.hotkeys and self.hotkeys.listening else {}  # Wayland: only `toggle` works
         return ev.Ready(self.engine.device, self.spec.repo, self.spec.language, self.engine.lm is not None,
-                        {key_label(k): m for k, m in self.keys().items()})
+                        {key_label(k): m for k, m in keys.items()})
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         """Shut down: stop previews, hotkeys, IPC and recorder, drop queued clips, free the model and GPU memory.
         Safe to call from the UI thread: it waits only for a model call already running (STOP_WAIT at most), never
-        for a UI event."""
+        for a UI event. False when that call was still running (see the module docstring)."""
         self._stopped.set()
         self._preview_stop.set()
         if self.hotkeys:
@@ -85,11 +90,13 @@ class Controller:
         self.translator = None
         if self._paste_lock.acquire(timeout=self.cfg.restore_delay + 1):  # a paste in flight restores the clipboard
             self._paste_lock.release()
-        if self._gpu.acquire(timeout=STOP_WAIT):
-            try:
-                self.engine.unload()
-            finally:
-                self._gpu.release()
+        if not self._gpu.acquire(timeout=STOP_WAIT):
+            return False
+        try:
+            self.engine.unload()
+        finally:
+            self._gpu.release()
+        return True
 
     def set_language(self, language: str) -> None:
         """Load `language`'s model in the background (Loading..., then Ready) and swap it in. The current model
@@ -137,6 +144,8 @@ class Controller:
             if self.cfg.sounds:
                 play_cue("start")
             self.emit(ev.RecordingStarted(mode))
+            if mode == "translate" and self.translator is None and self.spec.language in NLLB_CODES:
+                threading.Thread(target=self._preload_translator, daemon=True).start()
             if self.cfg.preview:
                 self._preview_stop = stop = threading.Event()
                 threading.Thread(target=self._preview_loop, args=(stop,), daemon=True).start()
@@ -215,21 +224,48 @@ class Controller:
                                 "warning", clip=True))
             return
         with self._gpu:
-            result = self.engine.transcribe(audio)
+            result = self.engine.transcribe(audio, sentences=mode == "translate")
             text = postprocess.process(result.text, self.cfg, self.words)
             if mode == "translate" and text:
-                text = self.translate(text)
+                try:
+                    text = self.translate([postprocess.process(s, self.cfg, self.words) for s in result.sentences])
+                except Exception as e:  # noqa: BLE001 - the Amharic text must not be lost with the translation
+                    self.emit(ev.Notice(f"could not translate: {translate_problem(e)}; the Amharic text is in "
+                                        "the history", "error"))
+                    self.emit(ev.Transcribed("dictate", text, result.text, len(audio) / SAMPLE_RATE,
+                                             result.compute_seconds, False))
+                    return
         with self._paste_lock:
             if self._stopped.is_set():  # quitting: the ⌘V would land in the terminal the user just quit
                 return
             pasted = bool(text) and paste.paste(text + " ", self.cfg.restore_delay)
         self.emit(ev.Transcribed(mode, text, result.text, len(audio) / SAMPLE_RATE, result.compute_seconds, pasted))
 
-    def translate(self, text: str) -> str:
+    def translate(self, sentences: list[str]) -> str:
+        """Caller holds _gpu."""
         if self.translator is None:
-            from qal_scribe.translate import Translator
-
             self.emit(ev.Loading("loading translation model"))
-            self.translator = Translator(self.engine.device)
-            self.translator.load()
-        return self.translator.translate(text)
+            self.translator = self._new_translator()
+        return self.translator.translate(sentences, self.spec.language)
+
+    def _new_translator(self):
+        from qal_scribe.translate import Translator
+
+        translator = Translator(self.engine.device)
+        translator.load()
+        return translator
+
+    def _preload_translator(self) -> None:
+        """Load the translator while the user is still speaking: 2.5 s that would otherwise follow the release."""
+        with self._gpu:
+            if self.translator is None and not self._stopped.is_set():
+                with contextlib.suppress(Exception):  # the clip's own translate() tries again and reports it
+                    self.translator = self._new_translator()
+
+
+def translate_problem(e: Exception) -> str:
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    if isinstance(e, LocalEntryNotFoundError):
+        return "the translation model is not downloaded (`qal-scribe models download --translation` fetches it)"
+    return f"{type(e).__name__}: {e}"

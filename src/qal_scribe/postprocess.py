@@ -17,7 +17,9 @@ ends, so neighbours stay separate: አንድ ሁለት = "1 2", ሃያ አስር
 that many hundreds, which is how years are spoken: አስራ ዘጠኝ መቶ ሰማንያ አምስት = 1985, ሃያ አምስት መቶ = 2500; such a
 year after ሺህ or ሚሊዮን starts a new number (ሁለት ሺህ አስራ ዘጠኝ መቶ = "2000 1900"). A bare አስራ, a ነጥብ that is not
 between a number and digit words, and ordinals (ሁለተኛ) are left alone. The prepositions በ ለ ከ የ stay attached,
-as Amharic writes them (በሶስት ሰዓት = በ3 ሰዓት); በመቶ ("percent") is never read as በ + 100.
+as Amharic writes them (በሶስት ሰዓት = በ3 ሰዓት, በሺህ ዘጠኝ መቶ ስልሳ ሶስት = በ1963); በመቶ ("percent") is never read as
+በ + 100, nor a lone በሺህ or በሚሊዮን ("by the thousand"). The definite ending on the last word of a number is kept
+after the digits (አርባ አምስቱ = 45ቱ, ከመቶ አስራ ሰባቱ = ከ117ቱ); a single word with it (አንዱ, ሁለቱ) stays a word.
 Known limits, all words that are also numbers: አንድ is the indefinite article ("አንድ ቀን" becomes "1 ቀን"), አንድ ላይ
 ("together") becomes "1 ላይ", አርባ ምንጭ (the city) becomes "40 ምንጭ", የመቶ አለቃ (a rank) becomes "የ100 አለቃ", and
 the old-style percent ከመቶ ሃምሳ becomes "ከ150". Leave the flag off if that hurts.
@@ -99,6 +101,20 @@ _PREFIXES = "በለከየ"
 _EDGE = re.compile(r"(\W*)(\w+)(\W*)")  # punctuation, word, punctuation
 
 
+def _lookup(word: str) -> tuple[tuple[str, int] | None, str]:
+    """Number entry of `word`, and the definite ending it carries: አምስቱ ("the five") is አምስት + ቱ."""
+    if not word:  # what follows a lone prefix letter (የ)
+        return None, ""
+    if entry := _WORDS.get(_key(word)):
+        return entry, ""
+    last = ord(word[-1])
+    if 0x1200 <= last <= 0x1357 and last % 8 == 1:  # a 2nd-order (-u) syllable; the 6th (no vowel) is 4 later
+        entry = _WORDS.get(_key(word[:-1] + chr(last + 4)))
+        if entry and entry[0] != "point":
+            return entry, word[-1]
+    return None, ""
+
+
 def _upto99(r: list[tuple[str, int]], k: int) -> tuple[int, int] | None:
     """Value 1-99 at r[k:] -> (value, next k). r carries two padding tokens so the look-ahead stays in range."""
     kind, value = r[k]
@@ -162,18 +178,21 @@ def _parse(run: list[tuple[str, int]]) -> tuple[str, int, int] | None:
     return str(value), k, 0
 
 
-def _number(toks: list[str], parts: list, plain: list, i: int) -> tuple[str, int] | None:
+def _number(toks: list[str], parts: list, plain: list, endings: list[str], i: int) -> tuple[str, int] | None:
     """Replacement for the number starting at toks[i] -> (text, index of the next token), or None."""
     if parts[i] is None:
         return None
     lead, core, _ = parts[i].groups()
     prefix, entry = "", plain[i]
     if entry is None and core[0] in _PREFIXES:
-        prefix, entry = core[0], _WORDS.get(_key(core[1:]))
-    if entry is None or (prefix == "በ" and entry[0] in ("hun", "scale")):  # በመቶ is "percent"
+        prefix, (entry, ending) = core[0], _lookup(core[1:])
+        if ending:  # ከሁለቱ: a number word with the ending is the last word of its number, here the only one
+            return None
+    if entry is None or (prefix == "በ" and entry[0] == "hun"):  # በመቶ is "percent"
         return None
     run, j = [entry], i
-    while j + 1 < len(toks) and plain[j + 1] and not parts[j][3] and not parts[j + 1][1]:  # no punctuation between
+    while (not endings[j] and j + 1 < len(toks) and plain[j + 1]  # the ending closes a number
+           and not parts[j][3] and not parts[j + 1][1]):  # no punctuation between
         j += 1
         run.append(plain[j])
     parsed = _parse(run)
@@ -181,17 +200,19 @@ def _number(toks: list[str], parts: list, plain: list, i: int) -> tuple[str, int
         return None
     digits, used, keep = parsed
     last = i + used - 1 - keep
-    piece = lead + prefix + digits + parts[last].group(3)
+    if last == i and (endings[i] or (prefix == "በ" and entry[0] == "scale")):  # አንዱ, በሺህ የሚቆጠሩ: words
+        return None
+    piece = lead + prefix + digits + endings[last] + parts[last].group(3)
     return (f"{piece} {toks[last + 1]}" if keep else piece), i + used
 
 
 def numbers_to_digits(text: str) -> str:
     toks = text.split()
     parts = [_EDGE.fullmatch(t) for t in toks]
-    plain = [_WORDS.get(_key(m[2])) if m else None for m in parts]
+    plain, endings = zip(*(_lookup(m[2]) if m else (None, "") for m in parts), strict=True) if toks else ((), ())
     out, i = [], 0
     while i < len(toks):
-        found = _number(toks, parts, plain, i)
+        found = _number(toks, parts, plain, endings, i)
         piece, nxt = found if found else (toks[i], i + 1)
         out.append(piece)
         i = nxt

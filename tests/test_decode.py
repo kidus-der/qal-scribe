@@ -150,3 +150,34 @@ def test_silence_and_tags_decode_to_nothing(beam_lm):
     assert beam_lm.decode(frames(BLANK, BLANK)) == ""
     assert beam_lm.decode(frames(tag, tag, BLANK)) == ""
     assert beam_lm.decode(np.zeros((0, 5), dtype="float32")) == ""
+
+
+def test_the_lm_does_not_glue_unknown_words_into_one(beam_lm):
+    beam_lm.alpha, beam_lm.beta = 1.0, 0.0
+    assert beam_lm._unblob(["ab", "baab"], ["ab", "ba", "ab"]) == ["ab", "ba", "ab"]  # baab is unknown
+    assert beam_lm._unblob(["ab"], ["a", "b"]) == ["ab"]  # a known word stays, even if greedy split it
+    assert beam_lm._unblob(["bbb"], ["ab", "ba"]) == ["bbb"]  # unknown, but no greedy words make it
+
+
+def test_greedy_words_merge_repeats_and_drop_blanks(beam_lm):
+    sure_a, sure_b, space = [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [1, 0, 0, 0, 0]
+    rows = [sure_a, sure_a, BLANK, sure_a, sure_b, space, [0, 0, 0, 0, 1], sure_b]
+    assert beam_lm._greedy(frames(*rows)) == ["aab", "b"]
+
+
+class PauseProcessor:
+    class tokenizer:  # stands in for processor.tokenizer
+        word_delimiter_token = "|"
+
+        @staticmethod
+        def get_vocab():
+            return {"|": 0, "a": 1, "b": 2, "[PAD]": 3, "[AMH]": 4}
+
+
+def test_split_pauses_cuts_in_the_middle_of_long_runs_without_letters():
+    a, gap, blank = [0, 1, 0, 0, 0], [1, 0, 0, 0, 0], BLANK
+    rows = [a, gap, a] + [blank] * 4 + [gap] * 4 + [a, a] + [blank] * 3 + [a]
+    pieces = decode.split_pauses(frames(*rows), PauseProcessor(), min_frames=6)
+    assert [len(p) for p in pieces] == [7, 10]  # one pause of 8 frames, cut at its middle; the 3-frame one stays
+    assert np.array_equal(np.concatenate(pieces), frames(*rows))
+    assert len(decode.split_pauses(frames(*[blank] * 20), PauseProcessor())) == 1  # silence alone: nothing to cut

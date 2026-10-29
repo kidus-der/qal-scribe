@@ -6,6 +6,7 @@ LM file or its decoder library (flashlight-text, with no wheels for Python 3.13+
 falls back to greedy. The first load_lm builds a word list next to the LM file (about 10 s, then cached).
 ALPHA and BETA are on pyctcdecode's scale (the model's decoder.json says 0.3 and 0.5) but re-tuned on the
 FLEURS Amharic dev split with eval/tune_lm.py.
+split_pauses(logits, processor) -> the logits cut at the model's pauses, for decoding sentence by sentence.
 """
 import json
 import logging
@@ -30,6 +31,10 @@ MIN_UNIGRAM = -7.5  # log10; the LM vocabulary is 8M words (mostly seen once), t
 _NEG = -1e30
 _LN10 = math.log(10)
 _NOT_WORDS = {"<unk>", "<s>", "</s>"}
+MAX_BLOB = 8  # most greedy words one unknown LM word is checked against (FLEURS blobs join up to 6)
+# Frames without a letter that end a sentence: 0.48 s at hohe-asr's 40 ms per frame. 3 dictated FLEURS sentences
+# translate at chrF 53.1 cut here (0.32 s: 49.8, too many cuts), 50.1 run together, 54.5 cut at the true ends.
+PAUSE_FRAMES = 12
 
 
 def greedy(logits: np.ndarray, processor, spec: ModelSpec) -> str:
@@ -37,6 +42,19 @@ def greedy(logits: np.ndarray, processor, spec: ModelSpec) -> str:
     if spec.output_tag:
         text = text.replace(spec.output_tag, "")
     return " ".join(text.split())
+
+
+def split_pauses(logits: np.ndarray, processor, min_frames: int = PAUSE_FRAMES) -> list[np.ndarray]:
+    """Cut [frames, vocab] logits in the middle of every pause: min_frames or more frames in a row whose best
+    token is no letter (a blank, word gap or tag). The model writes no ።, so pauses are where sentences end."""
+    tokenizer = processor.tokenizer
+    gap = getattr(tokenizer, "word_delimiter_token", "|")
+    letter = np.zeros(logits.shape[1], bool)
+    letter[[i for t, i in tokenizer.get_vocab().items() if len(t) == 1 and t != gap and i < len(letter)]] = True
+    at = np.flatnonzero(letter[logits.argmax(-1)])
+    wide = np.flatnonzero(np.diff(at) > min_frames)
+    cuts = ((at[wide] + at[wide + 1]) // 2 + 1).tolist()
+    return [logits[a:b] for a, b in zip([0, *cuts], [*cuts, len(logits)], strict=True)]
 
 
 def _add(a: float, b: float) -> float:
@@ -55,6 +73,8 @@ class BeamLM:
         self.alpha, self.beta, self.beam = alpha, beta, BEAM
         self.char_ids = np.array(sorted(chars))
         self.letters = [chars[i] for i in sorted(chars)]  # same order as char_ids
+        self.chars = chars
+        self.unk = words.get_index("<unk>")
 
     def decode(self, logits: np.ndarray) -> str:
         lp = logits.astype("float32")
@@ -62,7 +82,25 @@ class BeamLM:
         lp -= np.log(np.exp(lp).sum(-1, keepdims=True))
         other = np.ones(lp.shape[1], bool)  # the CTC blank and every tag or special token: all mean "no text"
         other[self.char_ids] = False
-        return self._search(lp[:, self.char_ids], np.logaddexp.reduce(lp[:, other], axis=1))
+        text = self._search(lp[:, self.char_ids], np.logaddexp.reduce(lp[:, other], axis=1))
+        return " ".join(self._unblob(text.split(), self._greedy(lp)))
+
+    def _greedy(self, lp: np.ndarray) -> list[str]:
+        """The greedy words: best token per frame, repeats merged, blanks and tags dropped."""
+        best = lp.argmax(-1)
+        best = best[np.r_[True, best[1:] != best[:-1]]] if len(best) else best
+        return "".join(self.chars.get(t, "") for t in best.tolist()).split()
+
+    def _unblob(self, words: list[str], greedy: list[str]) -> list[str]:
+        """Split the blobs the search makes of names and foreign words: k words the lexicon lacks cost k <unk>
+        scores, but glued together they cost one. An unknown word that is 2+ greedy words joined becomes those
+        words (FLEURS test: WER 14.62% -> 14.41%, words of 12+ letters 11 -> 3)."""
+        joined: dict[str, list[str]] = {}
+        for i in range(len(greedy)):
+            for j in range(i + 2, min(len(greedy), i + MAX_BLOB) + 1):
+                joined.setdefault("".join(greedy[i:j]), greedy[i:j])
+        return [part for w in words
+                for part in (joined.get(w, [w]) if self.words.get_index(w) == self.unk else [w])]
 
     def _word(self, state, word: str):
         """LM state after `word`, and its cost in the same units as the acoustic log-probabilities."""

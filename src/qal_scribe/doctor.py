@@ -5,6 +5,7 @@ config_problem(cfg) -> str | None says why a loaded config cannot start dictatio
 download anything or write files.
 """
 import importlib.util
+import math
 import platform
 import shutil
 import sys
@@ -40,14 +41,26 @@ def is_cached(repo: str, revision: str, *files: str) -> bool:
     return any(isinstance(try_to_load_from_cache(repo, f, revision=revision), str) for f in files)
 
 
+def available_devices() -> list[str]:
+    import torch
+
+    gpus = (("mps", torch.backends.mps.is_available()), ("cuda", torch.cuda.is_available()))
+    return ["cpu", *(d for d, ok in gpus if ok)]
+
+
 def config_problem(cfg: Config) -> str | None:
-    """Why this config cannot start dictation, or None."""
+    """Why this config cannot start dictation, or None. Imports torch when `device` is set."""
     try:
         models.get(cfg.language)
+        config_mod.load_words(cfg)
     except ValueError as e:
         return str(e)
-    if cfg.restore_delay < 0:
-        return f"restore_delay is {cfg.restore_delay}: it cannot be negative"
+    if not math.isfinite(cfg.restore_delay) or cfg.restore_delay < 0:
+        return f"restore_delay is {cfg.restore_delay}: it must be a number of seconds, 0 or more"
+    if cfg.device and cfg.device.split(":")[0] not in (available := available_devices()):
+        return f"device {cfg.device!r} is not available here: use one of {', '.join(available)}, or remove it"
+    if not cfg.dictate_key:
+        return "dictate_key is empty: set it to a key name such as alt_r (only translate_key can be turned off)"
     if cfg.translate_key and cfg.translate_key == cfg.dictate_key:
         return f"dictate_key and translate_key are both {cfg.dictate_key!r}"
     try:
@@ -82,15 +95,11 @@ def check_config(path: Path) -> tuple[Check, Config]:
 
 
 def check_device(cfg: Config) -> Check:
+    """The device dictation will use; an unavailable `device` setting is a config problem (check_config)."""
     import torch
 
     from qal_scribe.engine import pick_device
 
-    available = ["cpu"]
-    available += [d for d, ok in (("mps", torch.backends.mps.is_available()), ("cuda", torch.cuda.is_available())) if ok]
-    if cfg.device and cfg.device.split(":")[0] not in available:
-        return Check("Compute device", "fail", f"{cfg.device!r} is not available here",
-                     f"set device to one of {', '.join(available)}, or remove it from the config")
     device = pick_device(cfg.device)
     detail = f"{device} (torch {torch.__version__})"
     if device == "cpu" and not cfg.device:
@@ -121,6 +130,26 @@ def check_paste() -> Check:
     name = "Accessibility" if sys.platform == "darwin" else "Text insertion"
     ok, reason = paste.can_paste()
     return Check(name, "ok", reason) if ok else Check(name, "fail", "cannot insert text", reason)
+
+
+def microphone_permission() -> int:
+    """macOS AVAuthorizationStatus for audio: 0 not asked yet, 1 restricted, 2 denied, 3 allowed. Never prompts."""
+    import objc
+    from Foundation import NSBundle
+
+    NSBundle.bundleWithPath_("/System/Library/Frameworks/AVFoundation.framework").load()
+    return objc.lookUpClass("AVCaptureDevice").authorizationStatusForMediaType_("soun")  # AVMediaTypeAudio
+
+
+def check_microphone_permission() -> Check | None:
+    if sys.platform != "darwin":
+        return None
+    status = microphone_permission()
+    if status in (1, 2):
+        return Check("Microphone permission", "fail", "macOS gives the terminal silence instead of your voice",
+                     "System Settings > Privacy & Security > Microphone: turn on your terminal app, then quit and "
+                     "reopen it")
+    return Check("Microphone permission", "ok", "macOS asks the first time you record" if status == 0 else "granted")
 
 
 def check_input_monitoring() -> Check | None:
@@ -181,8 +210,8 @@ def run(path: Path) -> int:
     console = Console()
     with console.status("checking…"):  # the first torch import after an install takes ~10 s
         config_check, cfg = check_config(path)
-        checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_paste(),
-                  check_input_monitoring(), config_check, *check_models(cfg), check_disk()]
+        checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_microphone_permission(),
+                  check_paste(), check_input_monitoring(), config_check, *check_models(cfg), check_disk()]
     checks = [c for c in checks if c]
     table = Table(title="qal-scribe doctor", title_justify="left", header_style="bold")
     with_fix = any(c.fix for c in checks)

@@ -64,7 +64,7 @@ def test_translate_batches_sentences_and_capitalises():
     assert t.tokenizer.sentences == ["ሰላም ነው።", "ደህና ነህ፧"]
     assert out == "First lower Line 1 of 2"
     kw = t.model.kw
-    assert kw["num_beams"] == 4 and kw["forced_bos_token_id"] == 42
+    assert kw["num_beams"] == 4 and kw["forced_bos_token_id"] == 42 and kw["no_repeat_ngram_size"] == 4
     assert kw["max_new_tokens"] == 2 * 7 + 16 and kw["max_length"] is None
 
 
@@ -130,3 +130,19 @@ def test_load_is_idempotent(fake_hub):
     fake_hub.clear()
     t.load()
     assert t.model is model and not fake_hub
+
+
+def test_a_list_is_taken_as_its_sentences():
+    t = loaded_translator()
+    t.translate(["ሰላም ነው", "ደህና ነህ፧ አዎ.", "  "])
+    assert t.tokenizer.sentences == ["ሰላም ነው", "ደህና ነህ፧", "አዎ."]
+
+
+def test_the_source_language_follows_the_dictation_language():
+    t = loaded_translator()
+    t.translate("ሰላም", language="tir")
+    assert t.tokenizer.src_lang == "tir_Ethi"
+    t.translate("nagaa", language="orm")
+    assert t.tokenizer.src_lang == "gaz_Latn"
+    with pytest.raises(ValueError, match="no translation model for language 'sid'"):
+        t.translate("ሰላም", language="sid")

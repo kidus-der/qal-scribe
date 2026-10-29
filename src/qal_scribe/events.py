@@ -19,7 +19,8 @@ class Ready:
     model: str  # model repo id
     language: str  # e.g. "amh"
     lm: bool  # language-model decoding active
-    hotkeys: dict[str, Mode]  # human key name -> mode, e.g. {"Right Option": "dictate"}
+    hotkeys: dict[str, Mode]  # human key name -> mode, e.g. {"Right Option": "dictate"}; {} when none can be
+    # heard (Wayland): `qal-scribe toggle` is then the only way to record
 
 
 @dataclass(frozen=True)

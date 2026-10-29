@@ -3,6 +3,8 @@
 Contract (used by Controller and `qal-scribe transcribe`):
     engine = Engine(spec, device=None, use_lm=True); engine.load(on_progress)
     result = engine.transcribe(audio)  -> Result(text, compute_seconds); any length (split at quiet points)
+    engine.transcribe(audio, sentences=True) also fills Result.sentences: the text cut at the speaker's pauses,
+                                          each stretch decoded on its own (for translation; the model writes no ።)
     result = engine.preview(audio)     -> Result; greedy draft (no LM) of the last 30 s
     engine.unload()                    frees the weights and GPU memory
 Not thread-safe: the caller serialises calls (Controller holds one lock around every model call).
@@ -27,6 +29,7 @@ MIN_SEARCH = 3 * SAMPLE_RATE  # widest range a cut may be forced into
 class Result:
     text: str
     compute_seconds: float
+    sentences: tuple[str, ...] = ()  # only with transcribe(sentences=True); " ".join(sentences) == text
 
 
 def pick_device(requested: str | None = None) -> str:
@@ -134,10 +137,15 @@ class Engine:
         with torch.inference_mode():
             return self.model(**x).logits[0].float().cpu().numpy()
 
-    def transcribe(self, audio: np.ndarray) -> Result:
+    def transcribe(self, audio: np.ndarray, sentences: bool = False) -> Result:
         start = time.perf_counter()
-        texts = [decode.decode(self.logits(c), self.processor, self.spec, self.lm) for c in split_quiet(audio)]
-        return Result(" ".join(t for t in texts if t), time.perf_counter() - start)
+        texts = []
+        for chunk in split_quiet(audio):
+            logits = self.logits(chunk)
+            parts = decode.split_pauses(logits, self.processor) if sentences else [logits]
+            texts += [decode.decode(part, self.processor, self.spec, self.lm) for part in parts]
+        texts = [t for t in texts if t]
+        return Result(" ".join(texts), time.perf_counter() - start, tuple(texts) if sentences else ())
 
     def preview(self, audio: np.ndarray) -> Result:
         """Greedy draft of the last 30 s for live feedback; cheaper than transcribe (no LM, one chunk)."""

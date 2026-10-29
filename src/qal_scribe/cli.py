@@ -6,6 +6,8 @@ and exit code 1, never a traceback.
 """
 import argparse
 import logging
+import shlex
+import signal
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -37,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = command(sub, "config", "show the config file path")
     c.add_argument("--init", action="store_true", help="write a fully commented default config (never overwrites)")
     t = command(sub, "transcribe", "transcribe an audio file and print the text")
-    t.add_argument("file", help="wav, flac, ogg or mp3; any sample rate, mono or stereo")
+    t.add_argument("file", help="wav, flac, ogg or mp3 (m4a: convert it first); any sample rate, mono or stereo")
     t.add_argument("--translate", action="store_true", help="translate to English")
     command(sub, "about", "licences and model attribution")
     tg = command(sub, "toggle", "start/stop recording in the running instance (for Wayland key bindings)")
@@ -50,8 +52,20 @@ def fail(message: str) -> NoReturn:
 
 
 @contextmanager
-def friendly_download_errors():
-    """Turn "no network / model not available" into a one-line message with the way out."""
+def interruptible():
+    """Ctrl+C stops a download at once. With Python's handler it would not: the hub joins its download threads
+    before the KeyboardInterrupt surfaces, so the whole 3 GB would finish first. Main thread only."""
+    old = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old)
+
+
+@contextmanager
+def friendly_download_errors(required: bool = True):
+    """Turn "no network / model not available" into a one-line message with the way out: exit, or with
+    required=False a warning on stderr, and the caller goes on without the files."""
     from huggingface_hub.errors import (
         HfHubHTTPError,
         HTTPError,
@@ -65,6 +79,11 @@ def friendly_download_errors():
         yield
     except (HfHubHTTPError, HTTPError, LocalEntryNotFoundError, OfflineModeIsEnabled) as e:
         reason = str(e).splitlines()[0].removeprefix("Got: ") if str(e) else type(e).__name__
+        if not required:
+            print(f"qal-scribe: could not get the translation model; dictation works, translation will not yet:\n"
+                  f"  {reason}\nConnect to the internet and run `qal-scribe models download --translation`.",
+                  file=sys.stderr)
+            return
         fail(f"could not get the model files from Hugging Face:\n  {reason}\nConnect to the internet and run "
              "`qal-scribe models download`; once downloaded, qal-scribe works offline.")
 
@@ -136,7 +155,7 @@ def cmd_models(args: argparse.Namespace) -> None:
         return
     cfg = load_config(config_path(args.config), explicit=bool(args.config))
     spec = spec_for(args.language or cfg.language)
-    with friendly_download_errors():
+    with friendly_download_errors(), interruptible():
         print(f"Fetching {spec.language_name} model {spec.repo} ({spec.license})...", flush=True)
         print(f"-> {models.download(spec, with_lm=cfg.lm)}")
         if args.translation:
@@ -181,10 +200,15 @@ def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
     from qal_scribe.config import load_words
     from qal_scribe.engine import SAMPLE_RATE, Engine
 
+    check_config(cfg)
+    words = load_words(cfg)  # before the model load: a bad words.txt must not cost a 3 GB load first
     try:
         audio, sr = sf.read(file, dtype="float32")
-    except sf.SoundFileError as e:
-        fail(f"cannot read {file}: {e}\nConvert it with: ffmpeg -i {file} -ar 16000 -ac 1 out.wav")
+    except sf.SoundFileError as e:  # libsndfile reads no m4a/AAC, which is what Voice Memos and QuickTime save
+        quoted = shlex.quote(file)
+        convert = (f"afconvert -f WAVE -d LEI16@16000 -c 1 {quoted} out.wav" if sys.platform == "darwin"
+                   else f"ffmpeg -i {quoted} -ar 16000 -ac 1 out.wav")
+        fail(f"cannot read {file}: {e}\nConvert it with: {convert}")
     if audio.ndim == 2:
         audio = audio.mean(axis=1)  # stereo -> mono
     if sr != SAMPLE_RATE and len(audio):
@@ -194,20 +218,24 @@ def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
     with friendly_download_errors():
         engine = Engine(spec_for(cfg.language), device=cfg.device, use_lm=cfg.lm)
         engine.load()
-        text = postprocess.process(engine.transcribe(audio).text, cfg, load_words(cfg))
+        result = engine.transcribe(audio, sentences=translate)
+        text = postprocess.process(result.text, cfg, words)
         if translate:
-            from qal_scribe.translate import Translator
+            from qal_scribe.translate import NLLB_CODES, Translator
 
+            if cfg.language not in NLLB_CODES:
+                fail(f"no translation for {spec_for(cfg.language).language_name}; it knows {', '.join(NLLB_CODES)}")
             tr = Translator(engine.device)
             tr.load()
-            text = tr.translate(text)
+            text = tr.translate([postprocess.process(s, cfg, words) for s in result.sentences], cfg.language)
     print(text)
 
 
-def fetch_missing_models(cfg: Config, translation: bool = False) -> None:
+def fetch_missing_models(cfg: Config, translation: bool = False, translation_required: bool = True) -> None:
     """Download the weights before the UI starts: a failure inside the TUI's worker thread cannot reach
     friendly_download_errors(), and the hub's progress bars only look right in a plain terminal.
-    Says so on stderr, which keeps `transcribe`'s stdout to the text alone."""
+    Says so on stderr, which keeps `transcribe`'s stdout to the text alone. translation_required=False: a
+    failed translation download is a warning (dictation still works offline)."""
     from qal_scribe import models
     from qal_scribe.doctor import WEIGHT_FILES, is_cached
     from qal_scribe.translate import Translator
@@ -215,14 +243,15 @@ def fetch_missing_models(cfg: Config, translation: bool = False) -> None:
     spec = spec_for(cfg.language)
     has_weights = is_cached(spec.repo, spec.revision, *WEIGHT_FILES)
     has_lm = not (cfg.lm and spec.lm_file) or is_cached(spec.repo, spec.revision, spec.lm_file)
-    with friendly_download_errors():
-        if not (has_weights and has_lm):
-            print(f"First run: fetching {spec.language_name} model {spec.repo} ({spec.license}), about 3 GB...",
-                  file=sys.stderr, flush=True)
+    if not (has_weights and has_lm):
+        print(f"First run: fetching {spec.language_name} model {spec.repo} ({spec.license}), about 3 GB "
+              "(Ctrl+C cancels)...", file=sys.stderr, flush=True)
+        with friendly_download_errors(), interruptible():
             models.download(spec, with_lm=cfg.lm)
-        if translation and not is_cached(Translator.MODEL, Translator.REVISION, *WEIGHT_FILES):
-            print(f"First translation: fetching {Translator.MODEL} (CC-BY-NC-4.0), about 2.5 GB...",
-                  file=sys.stderr, flush=True)
+    if translation and not is_cached(Translator.MODEL, Translator.REVISION, *WEIGHT_FILES):
+        print(f"First run: fetching the translation model {Translator.MODEL} (CC-BY-NC-4.0), about 2.5 GB "
+              "(Ctrl+C cancels)...", file=sys.stderr, flush=True)
+        with friendly_download_errors(required=translation_required), interruptible():
             download_translation()
 
 
@@ -234,14 +263,19 @@ def quiet_progress_bars() -> None:
     disable_progress_bars()
 
 
-def cmd_run(cfg: Config, plain: bool) -> None:
-    if not sys.platform.startswith(("darwin", "linux")):
-        fail(f"{sys.platform} is not supported (macOS and Linux only)")
+def check_config(cfg: Config) -> None:
     from qal_scribe.doctor import config_problem
 
     if problem := config_problem(cfg):
         fail(f"bad config: {problem}\nSee `qal-scribe config` for its location and `qal-scribe doctor` to check it.")
-    fetch_missing_models(cfg)
+
+
+def cmd_run(cfg: Config, plain: bool) -> None:
+    if not sys.platform.startswith(("darwin", "linux")):
+        fail(f"{sys.platform} is not supported (macOS and Linux only)")
+    check_config(cfg)
+    # The translation model too: fetched inside the TUI it would be 2.5 GB behind a spinner, on a key press.
+    fetch_missing_models(cfg, translation=bool(cfg.translate_key), translation_required=False)
     if plain:
         from qal_scribe.plain import run
 

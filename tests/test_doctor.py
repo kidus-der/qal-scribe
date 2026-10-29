@@ -65,8 +65,28 @@ def test_config_problem_same_key_twice():
     assert doctor.config_problem(Config(translate_key="")) is None
 
 
-def test_config_problem_negative_restore_delay():
-    assert "negative" in doctor.config_problem(Config(restore_delay=-1))
+@pytest.mark.parametrize("delay", [-1, float("nan"), float("inf")])
+def test_config_problem_restore_delay_must_be_seconds(delay):
+    assert "0 or more" in doctor.config_problem(Config(restore_delay=delay))
+
+
+def test_config_problem_empty_dictate_key():
+    assert "dictate_key is empty" in doctor.config_problem(Config(dictate_key=""))
+
+
+@pytest.mark.parametrize("device", ["gpu", "cuda" if sys.platform == "darwin" else "mps", "cuda:7"])
+def test_config_problem_device_that_is_not_here(device):
+    if device.startswith("cuda") and doctor.available_devices().count("cuda"):
+        pytest.skip("this machine has CUDA")
+    assert f"device {device!r} is not available here" in doctor.config_problem(Config(device=device))
+    assert doctor.config_problem(Config(device="cpu")) is None
+
+
+def test_config_problem_unreadable_words_file(tmp_path):
+    words = tmp_path / "words.txt"
+    words.write_text("ኤፒአይ => API\n", encoding="utf-16")
+    assert "not UTF-8" in doctor.config_problem(Config(words_file=words))
+    assert str(tmp_path) in doctor.config_problem(Config(words_file=tmp_path))
 
 
 def test_microphone(monkeypatch):
@@ -134,9 +154,23 @@ def test_system(monkeypatch, platform, expected):
     assert doctor.check_system().status == expected
 
 
-def test_device_that_does_not_exist_fails():
-    assert doctor.check_device(Config(device="cuda:7" if sys.platform == "darwin" else "mps")).status == "fail"
-    assert doctor.check_device(Config(device="cpu")).status == "ok"
+def test_device_names_what_dictation_will_use():
+    check = doctor.check_device(Config(device="cpu"))
+    assert check.status == "ok" and check.detail.startswith("cpu (torch ")
+
+
+@pytest.mark.parametrize(("status", "expected"), [(0, "ok"), (1, "fail"), (2, "fail"), (3, "ok")])
+def test_microphone_permission(monkeypatch, status, expected):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(doctor, "microphone_permission", lambda: status)
+    check = doctor.check_microphone_permission()
+    assert check.status == expected
+    assert ("Privacy & Security > Microphone" in check.fix) == (expected == "fail")
+
+
+def test_microphone_permission_is_macos_only(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert doctor.check_microphone_permission() is None
 
 
 def test_disk_warns_when_low(monkeypatch, hf_cache):
@@ -148,8 +182,8 @@ def test_disk_warns_when_low(monkeypatch, hf_cache):
 
 def run_with(monkeypatch, tmp_path, **checks):
     ok = Check("x", "ok", "fine")
-    defaults = {"check_system": ok, "check_device": ok, "check_microphone": ok, "check_paste": ok,
-                "check_input_monitoring": None, "check_disk": ok}
+    defaults = {"check_system": ok, "check_device": ok, "check_microphone": ok, "check_microphone_permission": None,
+                "check_paste": ok, "check_input_monitoring": None, "check_disk": ok}
     for name, result in {**defaults, **checks}.items():
         monkeypatch.setattr(doctor, name, lambda *_, result=result: result)
     return doctor.run(tmp_path / "config.toml")

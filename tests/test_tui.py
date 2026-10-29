@@ -18,6 +18,7 @@ from qal_scribe import events as ev
 from qal_scribe import models
 from qal_scribe.app import QalApp
 from qal_scribe.config import Config
+from qal_scribe.hotkey import WAYLAND_REASON
 from qal_scribe.tui.widgets import HistoryRow, Meter
 
 KEYS = {"Right Option": "dictate", "Right Control": "translate"}
@@ -51,9 +52,9 @@ class FakeController:
 COPIED: list[str] = []  # what the copy key put on the (fake) system clipboard
 
 
-def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipboard=True):
+def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipboard=True, notifications=False):
     """Run `scenario(app, fake, pilot)` against the app (fake = the FakeController it started).
-    clipboard=False: the system clipboard is unreachable."""
+    clipboard=False: the system clipboard is unreachable. notifications=True draws toasts (screenshots)."""
     made: list[FakeController] = []
 
     def make(c, emit):
@@ -62,7 +63,7 @@ def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipb
 
     async def go():
         app = QalApp(cfg or Config(), controller_factory=factory or make)
-        async with app.run_test(size=size) as pilot:
+        async with app.run_test(size=size, notifications=notifications) as pilot:
             if not hold:
                 await settle(pilot)
             await scenario(app, made[0] if made else None, pilot)
@@ -332,6 +333,19 @@ def test_translate_mode_has_its_own_pill_title_and_border():
     drive(scenario)
 
 
+def test_a_clip_after_a_result_shows_transcribing_not_the_old_text():
+    async def scenario(app, fake, pilot):
+        def stage() -> str:
+            return shown(app, "#hero") if app.query_one("#hero").display else shown(app, "#transcript")
+
+        await send(pilot, done("አንድ"), ev.RecordingStarted("translate"), ev.RecordingStopped("translate", 2.0))
+        assert "Translating…" in stage() and "አንድ" not in stage()
+        await send(pilot, done("", pasted=False), ev.RecordingStarted("dictate"), ev.RecordingStopped("dictate", 1))
+        assert "Transcribing…" in stage()
+
+    drive(scenario)
+
+
 def test_translation_model_loading_is_a_note_not_a_return_to_loading():
     async def scenario(app, fake, pilot):
         await send(pilot, ev.RecordingStopped("translate", 2.0), ev.Loading("loading translation model"))
@@ -416,6 +430,43 @@ def test_transcripts_with_markup_characters_render_literally():
 
 
 # -- notices become toasts ---------------------------------------------------------------------------------
+
+
+class SetupWarnings(FakeController):
+    """A start that cannot hear the hotkeys: Wayland (no keys at all) and a paste problem."""
+
+    def start(self):
+        self.started.set()
+        self.emit(ev.Notice(WAYLAND_REASON, "warning"))
+        self.emit(ev.Notice("text insertion needs wtype", "warning"))
+        self.emit(dataclasses.replace(READY, hotkeys={}))
+
+
+def test_without_global_hotkeys_the_screen_says_toggle_and_keeps_the_warnings():
+    async def scenario(app, fake, pilot):
+        text = screen_text(app)
+        assert "Right Option" not in text and "Hold" not in text and toasts(app) == []
+        assert "Run qal-scribe toggle (bound to a key)" in text and "qal-scribe toggle --translate" in text
+        assert "Wayland does not allow global hotkeys" in text and "text insertion needs wtype" in text
+        await send(pilot, ev.RecordingStarted("dictate"))
+        assert "run `qal-scribe toggle` again to finish" in screen_text(app)
+        assert "Right Option" not in screen_text(app)
+
+    for size in ((120, 36), (80, 24)):
+        drive(scenario, size=size, factory=lambda c, e: SetupWarnings(c, e))
+
+
+def test_compact_shows_notices_in_the_stage_instead_of_toasts(monkeypatch):
+    async def scenario(app, fake, pilot):
+        message = "could not start recording: PortAudioError: Error starting stream; `qal-scribe doctor` checks it"
+        await send(pilot, ev.Notice(message, "error"))
+        assert toasts(app) == [] and "could not start recording" in screen_text(app) and "READY" in pill(app)
+        app.flash = (app.flash[0], 0)  # its time is up
+        app.refresh_view()
+        await pilot.pause()
+        assert "could not start recording" not in screen_text(app)
+
+    drive(scenario, size=(80, 5), cfg=Config(compact=True))
 
 
 def test_notices_become_toasts_with_matching_severity():
@@ -733,17 +784,31 @@ def test_run_hard_exits_only_while_the_controller_is_still_starting(monkeypatch)
     class Stub:
         def __init__(self, cfg):
             self.boot_thread = types.SimpleNamespace(is_alive=lambda: still_loading)
+            self.clean_exit = clean
 
         def run(self):
             pass
 
     monkeypatch.setattr(app_mod, "QalApp", Stub)
-    still_loading = True
+    still_loading, clean = True, True
     app_mod.run(Config())
     assert exits == [0]
     still_loading = False
     app_mod.run(Config())
     assert exits == [0]
+    clean = False  # stop() gave up on a model call (a translation model download, say)
+    app_mod.run(Config())
+    assert exits == [0, 0]
+
+
+def test_q_records_whether_stop_left_a_model_call_running():
+    async def scenario(app, fake, pilot):
+        fake.stop = lambda: False
+        await pilot.press("q")
+        await settle(pilot)
+        assert not app.is_running and app.clean_exit is False
+
+    drive(scenario)
 
 
 def test_mic_name_follows_the_configured_device_and_never_raises(monkeypatch):

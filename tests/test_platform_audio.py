@@ -87,3 +87,59 @@ def test_a_mic_that_cannot_be_opened_is_a_value_error(monkeypatch, device):
     fake_sounddevice(monkeypatch, PortAudioError=PortAudioError).InputStream = refuse
     with pytest.raises(ValueError, match="cannot open .*Error querying device 99.*qal-scribe doctor"):
         audio.Recorder(device=device)
+
+
+class FakeStream:
+    """An InputStream whose device can vanish: start() then fails until PortAudio is restarted."""
+
+    def __init__(self, sd, **kw):
+        self.sd, self.kw, self.active, self.closed = sd, kw, False, False
+        sd.opened.append(self)
+
+    def start(self):
+        if self.sd.unplugged and self.generation == 0:  # opened before the restart
+            raise self.sd.PortAudioError("Error starting stream: Internal PortAudio error [PaErrorCode -9986]")
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def close(self):
+        self.closed = True
+
+
+def unpluggable_sounddevice(monkeypatch):
+    class PortAudioError(Exception):
+        pass
+
+    sd = fake_sounddevice(monkeypatch, PortAudioError=PortAudioError, unplugged=False, generation=0)
+
+    def stream(**kw):
+        s = FakeStream(sd, **kw)
+        s.generation = sd.generation
+        return s
+
+    sd.InputStream = stream
+    sd._terminate = lambda: setattr(sd, "generation", sd.generation + 1)  # a fresh device list from here on
+    sd._initialize = lambda: None
+    return sd
+
+
+def test_a_mic_unplugged_since_the_start_is_found_again(monkeypatch):
+    sd = unpluggable_sounddevice(monkeypatch)
+    r = audio.Recorder(device="USB")
+    sd.unplugged = True
+    r.start()  # the first stream's device is gone: restart PortAudio, open a new stream, start that
+    assert len(sd.opened) == 2 and sd.opened[0].closed and r.active
+    assert sd.opened[1].kw["device"] == "USB"
+
+
+def test_a_clip_of_only_zeros_reopens_the_stream_for_the_next_one(monkeypatch):
+    sd = unpluggable_sounddevice(monkeypatch)
+    r = audio.Recorder()
+    r.start()
+    r._callback(np.zeros((160, 1), dtype="float32"), 160, None, None)
+    assert not r.stop().any() and len(sd.opened) == 2
+    r.start()
+    r._callback(np.full((160, 1), 0.01, dtype="float32"), 160, None, None)
+    assert r.stop().any() and len(sd.opened) == 2  # real sound: the stream is kept

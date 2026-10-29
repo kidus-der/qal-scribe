@@ -146,8 +146,9 @@ Screen.-translating #stage { border: round $secondary; }
 Screen.-failed #pill { background: $error; }
 Screen.-failed #stage { border: round $error; }
 Screen.-quitting #pill { background: $warning; }
-/* nothing to meter yet: give the rows to the loading message or the start error */
-Screen.-loading Meter, Screen.-failed Meter, Screen.-failed #hero-title { display: none; }
+/* nothing to meter yet: give the rows to the loading message, the start error or the setup warnings */
+Screen.-loading Meter, Screen.-failed Meter, Screen.-failed #hero-title, Screen.-notes.-ready Meter { display: none; }
+Screen.-notes #stage { min-height: 12; }
 
 /* narrow terminals: hotkey reminder moves out of the footer; history text gets the stats' width (the stage
    subtitle shows the latest stats) */

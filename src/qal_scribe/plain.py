@@ -1,4 +1,5 @@
 """`qal-scribe --plain`: line-based output for logs, scripts and terminals without TUI support."""
+import os
 import sys
 import threading
 
@@ -12,7 +13,9 @@ def format_event(e: ev.Event) -> str | None:
         case ev.Loading(message):
             return f"… {message}"
         case ev.Ready(device, model, _, lm, hotkeys):
-            keys = ", ".join(f"hold {k} to {m}" for k, m in hotkeys.items())
+            keys = ", ".join(f"hold {k} to {m}" for k, m in hotkeys.items()) or (
+                "run `qal-scribe toggle` (bound to a key) to start and stop, `qal-scribe toggle --translate` for "
+                "English")
             return f"ready on {device} ({model}{', LM on' if lm else ''}): {keys}. Ctrl+C to quit"
         case ev.RecordingStarted(mode):  # with sounds off or `toggle`, the only sign the press was heard
             return f"● recording ({mode})"
@@ -32,8 +35,9 @@ def run(cfg: Config) -> None:
         if line:
             print(line, flush=True)
 
-    controller = Controller(cfg, emit)
+    controller = None
     try:
+        controller = Controller(cfg, emit)
         controller.start()
         threading.Event().wait()
     except KeyboardInterrupt:
@@ -41,4 +45,6 @@ def run(cfg: Config) -> None:
     except (RuntimeError, ValueError) as e:  # already running, unknown mic: say it in one line
         sys.exit(f"qal-scribe: {e}")
     finally:
-        controller.stop()
+        if controller and controller.stop() is False:  # a model call (or its download) is still running
+            sys.stdout.flush()
+            os._exit(0)

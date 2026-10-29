@@ -1,7 +1,7 @@
 """User config from ~/.config/qal-scribe/config.toml (or $XDG_CONFIG_HOME). Missing file -> defaults.
 
 Contract: load(path=None) -> Config (ValueError for unknown keys or wrong types); load_words(cfg) -> the words.txt
-replacements, {heard: wanted}.
+replacements, {heard: wanted} (ValueError naming the file when it cannot be read as UTF-8 text).
 """
 import os
 import tomllib
@@ -52,8 +52,14 @@ def load_words(cfg: Config) -> dict[str, str]:
     """words.txt lines: `heard => wanted` replacements; blank lines and # comments ignored."""
     if not cfg.words_file.exists():
         return {}
+    try:
+        text = cfg.words_file.read_text(encoding="utf-8-sig")  # -sig: Notepad's BOM would hide the first entry
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{cfg.words_file}: not UTF-8 text ({e.reason} at byte {e.start}); save it as UTF-8") from e
+    except OSError as e:  # e.g. words_file is a folder
+        raise ValueError(f"{cfg.words_file}: {e.strerror or e}") from e
     pairs = {}
-    for line in cfg.words_file.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         line = line.split("#", 1)[0].strip()
         if "=>" in line:
             heard, wanted = (s.strip() for s in line.split("=>", 1))

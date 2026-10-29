@@ -36,3 +36,20 @@ jobs:
           out=$(uv run qal-scribe doctor || true)
           echo "$out"
           echo "$out" | grep -E 'Ready to dictate|Dictation is blocked'
+
+  # A stock Ubuntu with only the packages the README lists: pynput pulls in evdev, which has no wheels and is
+  # compiled at install time. The test job's runner ships compilers and headers, so it cannot catch a gap.
+  linux-install:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: The packages the README lists
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates libportaudio2 build-essential python3-dev
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel
+      - name: uv tool install, as the README says
+        shell: bash
+        run: |
+          uv tool install --python 3.12 --torch-backend cpu dist/*.whl
+          "$(uv tool dir --bin)/qal-scribe" --version
