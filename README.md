@@ -1,19 +1,160 @@
 # qal-scribe
 
 On-device push-to-talk dictation for Amharic. Hold a key, speak, let go: the text appears wherever your cursor is.
+A second key turns Amharic speech into English text. Everything runs on your computer; after the models are
+downloaded nothing leaves it.
+
+- **macOS** (Apple Silicon or Intel) is the main platform. **Linux** works and is in beta.
+- Speech model: [snapwre/hohe-asr-amharic](https://huggingface.co/snapwre/hohe-asr-amharic) (wav2vec2-BERT 600M,
+  CC-BY-4.0), decoded with its KenLM language model. On an Apple GPU a 10 s clip takes about 0.15 s.
+- Translation: [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)
+  (CC-BY-NC-4.0: **non-commercial use only**), downloaded the first time you use it.
 
 ## Install
 
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
 ```sh
-uv tool install qal-scribe
+uv tool install --python 3.12 qal-scribe
 qal-scribe doctor      # checks permissions, microphone and models, and says how to fix what is missing
 qal-scribe             # hold Right Option, speak, release
 ```
 
+The first start downloads the speech model and its language model (about 3 GB); later starts work offline.
+`qal-scribe models download --translation` fetches the translation model (2.5 GB) up front.
+
 On Linux without an NVIDIA GPU, install the CPU build of PyTorch instead of the multi-GB CUDA one:
 
 ```sh
-uv tool install qal-scribe --torch-backend cpu
+uv tool install --python 3.12 qal-scribe --torch-backend cpu
 ```
 
-Work in progress.
+`--python 3.12` matters: the language-model decoder has no builds for newer Pythons, and without it qal-scribe
+falls back to slightly less accurate greedy decoding (`qal-scribe doctor` warns about it). uv downloads Python 3.12
+if you do not have it.
+
+### macOS permissions
+
+Give the terminal app you run qal-scribe from (Terminal, iTerm2, Ghostty, ...) these three permissions in
+System Settings > Privacy & Security, then quit and reopen the terminal:
+
+- **Microphone**, to hear you (macOS asks the first time you record).
+- **Input Monitoring**, so the hotkeys work while another app is in front.
+- **Accessibility**, to paste into that app.
+
+`qal-scribe doctor` shows which ones are missing.
+
+## Use
+
+| Key | What it does |
+|---|---|
+| Hold **Right Option**, speak, release | Amharic text is pasted at your cursor |
+| Hold **Right Control**, speak, release | The English translation is pasted |
+
+Pasting goes through the clipboard: qal-scribe saves what you had copied and puts it back half a second later.
+While you speak, a live draft appears in the window (turn it off with `preview = false`).
+
+The terminal window shows the state (ready, recording, transcribing), a mic level meter and a history of what
+you said. Its keys: `c` copies the last text, `Enter` copies the selected history row, `l` switches language,
+`t` changes the theme, `m` toggles a compact 3-5 line layout for a small always-visible window, `q` quits.
+`qal-scribe --plain` prints one line per event instead, for logs or terminals without a full UI.
+
+### Linux (beta)
+
+Text is typed with `wtype` (Wayland: sway, Hyprland, ...), `xdotool` (X11) or, on GNOME and KDE Wayland,
+pasted with `wl-copy` + `ydotool` (needs `ydotoold` running; terminals want Ctrl+Shift+V, so pasting into a
+terminal does not work there). Without any of them the text goes to the clipboard and the window says so.
+`qal-scribe doctor` tells you what to install. You also need PortAudio (`sudo apt install libportaudio2`).
+
+Wayland does not let programs read global hotkeys, so bind two keys in your compositor or desktop settings to:
+
+```sh
+qal-scribe toggle              # first press starts recording, second press pastes Amharic
+qal-scribe toggle --translate  # the same, pasting English
+```
+
+Linux has only been tested in CI and with simulated tools so far. Please report what works and what does not.
+
+## Settings
+
+`qal-scribe config --init` writes a fully commented `~/.config/qal-scribe/config.toml` (or under
+`$XDG_CONFIG_HOME`) listing every setting with its default; `qal-scribe config` prints its path. The ones you are
+most likely to change:
+
+| Setting | Default | |
+|---|---|---|
+| `dictate_key`, `translate_key` | `"alt_r"`, `"ctrl_r"` | [pynput key names](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) such as `cmd_r`, `shift_r`, `f13`; `translate_key = ""` turns translation off |
+| `mic` | system default | part of a microphone's name, or its number |
+| `numbers_to_digits` | `false` | write spoken numbers as digits: ሁለት ሺህ አስራ ሰባት → 2017 |
+| `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
+| `punctuation` | `false` | add ። ? and ፣ by rule (**experimental**, see below) |
+| `lm` | `true` | decode with the language model; `false` is plain greedy decoding |
+| `sounds` | `true` | short sound when recording starts and stops |
+
+Run `qal-scribe doctor` after editing to check the file.
+
+### Your own words
+
+Put corrections in `~/.config/qal-scribe/words.txt`, one per line: `heard => wanted`, for example
+`ኤፒአይ => API`. Lines starting with `#` are ignored. The `wanted` text still goes through
+`merge_homophones` and `numbers_to_digits` when those are on, so a wanted word containing ዓ or a number word can
+change; turn those settings off if that happens.
+
+### Punctuation (experimental)
+
+Amharic speech models write no punctuation. With `punctuation = true`, qal-scribe adds it with simple rules: ?
+after a sentence with a question word (ምን, ማን, የት, መቼ, እንዴት, ስንት, ...), ። otherwise, and ፣ before ነገር ግን, ሆኖም
+and ምክንያቱም. The rules prefer a missing mark to a wrong one, but they do make mistakes: an exclamation such as
+እንዴት ደስ ይላል gets ?, and a yes/no question without a question word (ዛሬ ትመጣለህ) gets ።. Check the text before
+you send it.
+
+Spoken numbers have known traps too: አንድ ("a", "one") becomes 1 in አንድ ቀን, and the city አርባ ምንጭ becomes 40 ምንጭ.
+
+## Accuracy
+
+Measured on the 516 clips of the FLEURS Amharic test split with `eval/evaluate.py` (lower is better; scoring folds
+homophone letters and drops punctuation):
+
+| Decoding | CER | WER |
+|---|---|---|
+| greedy (the model alone) | CER_GREEDY | WER_GREEDY |
+| with the language model (default) | CER_LM | WER_LM |
+
+## More languages (experimental)
+
+Tigrinya (`tir`), Afaan Oromo (`orm`), Somali (`som`), Sidaama (`sid`) and Wolaytta (`wal`) run through the same
+engine with other open models. They are rough drafts at best: see [docs/languages.md](docs/languages.md) for
+their accuracy and licences (the Somali model is non-commercial). Download one with
+`qal-scribe models download tir`, then press `l` in the window or set `language = "tir"`. Translation and the
+text clean-up settings are made for Amharic.
+
+## Commands
+
+```
+qal-scribe                     start dictating (terminal UI)
+qal-scribe --plain             the same, one line per event
+qal-scribe doctor              check permissions, microphone, device, config and models
+qal-scribe models              list languages and whether each model is downloaded
+qal-scribe models download [LANG] [--translation]
+qal-scribe transcribe FILE.wav [--translate]   16 kHz mono wav to text
+qal-scribe config [--init]     show (or create) the config file
+qal-scribe toggle [--translate]                start/stop recording in the running instance
+qal-scribe about               licences and model attribution
+```
+
+## Licence
+
+The code is MIT licensed. The models are downloaded at run time and keep their own licences: the Amharic speech
+model is CC-BY-4.0 and the translation model is CC-BY-NC-4.0, which allows **non-commercial use only**.
+`qal-scribe about` lists them all.
+
+## Development
+
+```sh
+uv sync
+uv run ruff check
+uv run pytest                  # no model weights are loaded
+uv run python scripts/gpu_lock.py -- uv run pytest -m model     # tests with the real models
+uv run python eval/fetch_fleurs.py && \
+  uv run python scripts/gpu_lock.py -- uv run python eval/evaluate.py eval/data/fleurs-am-test --compare
+```

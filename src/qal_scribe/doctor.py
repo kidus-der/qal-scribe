@@ -4,6 +4,7 @@ Contract: run(path) -> int prints the table for the config file at `path` and re
 config_problem(cfg) -> str | None says why a loaded config cannot start dictation. Checks never record audio,
 download anything or write files.
 """
+import importlib.util
 import platform
 import shutil
 import sys
@@ -141,6 +142,10 @@ def check_models(cfg: Config) -> list[Check]:
            else Check("Speech model", "warn", f"{spec.repo} not downloaded (about 2.4 GB)", fetch))
     if not cfg.lm or not spec.lm_file:
         lm = Check("Language model", "ok", "off" if not cfg.lm else "none for this language")
+    elif importlib.util.find_spec("flashlight") is None:
+        lm = Check("Language model", "warn", f"its decoder (flashlight-text) has no build for Python "
+                   f"{platform.python_version()}, so decoding is greedy and a little less accurate",
+                   "reinstall on Python 3.12: uv tool install --python 3.12 --reinstall qal-scribe")
     elif is_cached(spec.repo, spec.revision, spec.lm_file):
         lm = Check("Language model", "ok", f"{spec.lm_file} cached")
     else:

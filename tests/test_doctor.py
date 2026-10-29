@@ -27,6 +27,14 @@ def test_models_not_cached_warn_then_ok(hf_cache):
     assert [c.status for c in doctor.check_models(cfg)] == ["ok", "ok", "ok"]
 
 
+def test_missing_lm_decoder_is_a_warning_with_the_fix(hf_cache, monkeypatch):
+    import importlib.util
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    lm = next(c for c in doctor.check_models(Config()) if c.name == "Language model")
+    assert lm.status == "warn" and "greedy" in lm.detail and "--python 3.12" in lm.fix
+
+
 def test_models_cached_at_another_revision_do_not_count(hf_cache):
     hf_cache(SPEC.repo, "0" * 40, "model.safetensors")
     assert status(doctor.check_models(Config()), "Speech model") == "warn"
