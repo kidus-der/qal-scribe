@@ -38,6 +38,14 @@ from qal_scribe.tui.widgets import (
 )
 
 SEVERITY = {"info": "information", "warning": "warning", "error": "error"}
+
+
+def installed_languages(current: str) -> list[str]:
+    """What `l` cycles through: the current language and every model already downloaded. Switching to one that
+    is not downloaded would start a 1-3 GB download from a single key press."""
+    from qal_scribe.doctor import WEIGHT_FILES, is_cached
+
+    return [c for c, s in models.MODELS.items() if c == current or is_cached(s.repo, s.revision, *WEIGHT_FILES)]
 PERCENT = re.compile(r"(\d{1,3})\s*%")
 HISTORY_LEGEND = "audio · compute   ✓ pasted  ✗ not pasted"
 
@@ -269,6 +277,8 @@ class QalApp(App):
         return Content("\n").join([*lines, Content("Release to paste at your cursor.")])
 
     def refresh_view(self) -> None:
+        if not self.is_running:  # shutting down: the timer or a late event can fire after widgets are removed
+            return
         state = self.state
         for s in STATES:
             self.screen.set_class(s == state, f"-{s}")
@@ -325,10 +335,11 @@ class QalApp(App):
             self.copy(event.item.entry.text)
 
     def action_language(self) -> None:
-        codes = list(models.MODELS)
+        codes = installed_languages(self.language)
         switch = getattr(self.controller, "set_language", None)
         if len(codes) < 2:
-            self.notify(f"only {models.MODELS[codes[0]].language_name} is installed", timeout=3)
+            self.notify(f"only {models.MODELS[codes[0]].language_name} is installed; add one with "
+                        "`qal-scribe models download LANG`", timeout=5)
         elif switch is None:
             self.notify("language switching is not available yet", severity="warning", timeout=3)
         else:

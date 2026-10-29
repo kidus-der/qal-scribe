@@ -114,7 +114,14 @@ def rows(app) -> list[str]:
 def two_languages(monkeypatch):
     spec = models.MODELS["amh"]
     swahili = dataclasses.replace(spec, language="swh", language_name="Swahili")
-    monkeypatch.setitem(models.MODELS, "swh", swahili)
+    monkeypatch.setattr(models, "MODELS", {"amh": spec, "swh": swahili})
+    monkeypatch.setattr(app_mod, "installed_languages", lambda current: list(models.MODELS))
+
+
+def test_installed_languages_skips_models_that_are_not_downloaded(monkeypatch):
+    monkeypatch.setattr("qal_scribe.doctor.is_cached", lambda repo, *_: repo == models.MODELS["tir"].repo)
+    assert app_mod.installed_languages("amh") == ["amh", "tir"]
+    assert app_mod.installed_languages("som") == ["tir", "som"]
 
 
 def test_importing_the_app_does_not_load_torch():
@@ -353,10 +360,14 @@ def test_enter_copies_the_selected_history_row():
     drive(scenario)
 
 
-def test_l_with_one_model_says_so_and_does_not_call_the_controller():
+def test_l_with_one_model_says_so_and_does_not_call_the_controller(monkeypatch):
+    monkeypatch.setattr(app_mod, "installed_languages", lambda current: [current])
+
     async def scenario(app, fake, pilot):
         await pilot.press("l")
-        assert toasts(app) == [("only Amharic is installed", "information")] and fake.languages == []
+        [(message, severity)] = toasts(app)
+        assert message.startswith("only Amharic is installed") and severity == "information"
+        assert fake.languages == []
 
     drive(scenario)
 
