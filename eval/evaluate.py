@@ -2,7 +2,9 @@
 
 uv run python scripts/gpu_lock.py -- uv run python eval/evaluate.py eval/data/fleurs-am-test [--no-lm] [--limit N]
 Prints one JSON line: {"clips": N, "cer": .., "wer": .., "lm": bool, "seconds": ..}. Scoring folds Amharic
-homophones and drops punctuation, matching how the model authors score (see qal_scribe.textnorm).
+homophones (ዓ and ኣ fold to አ, ሠ to ሰ, ...) and drops punctuation, matching how the model authors score (see
+qal_scribe.textnorm). Scores measured before the ዓ/ኣ fold was added are not comparable: re-measure baseline and
+candidate with the same normalize().
 """
 import argparse
 import json
