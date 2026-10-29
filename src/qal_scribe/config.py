@@ -25,6 +25,7 @@ class Config:
     theme: str = "qal"
     compact: bool = False
     mic: str | None = None  # input device name (substring) or index; None = system default
+    preview: bool = True  # show a live draft while recording
 
 
 def load(path: Path | None = None) -> Config:
