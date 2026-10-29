@@ -1,16 +1,18 @@
-"""CTC decoding: greedy, or a character beam search that lets the model's KenLM word 5-gram score each word.
+"""CTC decoding: greedy, or a character beam search in which the model's KenLM word 5-gram scores every word.
 
 Contract: decode(logits, processor, spec, lm=None) -> str. `logits` is a [frames, vocab] float32 numpy array
 (raw model output). load_lm(model_dir, spec) returns an object with .decode(logits) -> str, or None when the
-LM file or its decoder library (flashlight-text, no wheels for Python 3.13+) is unavailable; decode() then
-falls back to greedy. The search runs on the same scale as pyctcdecode (decoder.json: alpha, beta), but the
-values below are re-tuned on the FLEURS Amharic dev split (eval/tune_lm.py).
+LM file or its decoder library (flashlight-text, with no wheels for Python 3.13+) is unavailable; decode() then
+falls back to greedy. The first load_lm builds a word list next to the LM file (about 10 s, then cached).
+ALPHA and BETA are on pyctcdecode's scale (the model's decoder.json says 0.3 and 0.5) but re-tuned on the
+FLEURS Amharic dev split with eval/tune_lm.py.
 """
 import json
 import logging
 import math
 import mmap
 import os
+import struct
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +25,7 @@ ALPHA = 0.25  # weight of the LM log-probability (natural-log units, as pyctcdec
 BETA = 1.0  # bonus per word; offsets the LM's cost of every extra word
 BEAM = 50
 MIN_LOGP = -6.0  # characters rarer than this in a frame are not tried
+TOP_CHARS = 8  # nor are more than this many per frame: bounds the work on noise, where the model is unsure
 MIN_UNIGRAM = -7.5  # log10; the LM vocabulary is 8M words (mostly seen once), the useful ones are ~1.4M
 _NEG = -1e30
 _LN10 = math.log(10)
@@ -46,10 +49,10 @@ def _add(a: float, b: float) -> float:
 class BeamLM:
     """CTC prefix beam search. A word is scored by the LM when its trailing space (or the end) is reached."""
 
-    def __init__(self, kenlm, words, chars: dict[int, str], alpha: float = ALPHA, beta: float = BETA,
-                 beam: int = BEAM):
-        self.kenlm, self.words, self.chars = kenlm, words, chars
-        self.alpha, self.beta, self.beam = alpha, beta, beam
+    def __init__(self, kenlm, words, chars: dict[int, str], alpha: float = ALPHA, beta: float = BETA):
+        """`words` is the flashlight Dictionary kenlm was built with; `chars` maps token id -> character."""
+        self.kenlm, self.words = kenlm, words
+        self.alpha, self.beta, self.beam = alpha, beta, BEAM
         self.char_ids = np.array(sorted(chars))
         self.letters = [chars[i] for i in sorted(chars)]  # same order as char_ids
 
@@ -67,7 +70,9 @@ class BeamLM:
         return state, self.alpha * _LN10 * score + self.beta
 
     def _search(self, chars: np.ndarray, blank: np.ndarray) -> str:
-        frame, token = np.nonzero(chars > MIN_LOGP)
+        top = min(TOP_CHARS, chars.shape[1])
+        kth = np.partition(chars, -top, axis=1)[:, -top, None]  # each frame's TOP_CHARS-th best
+        frame, token = np.nonzero((chars > MIN_LOGP) & (chars >= kth))
         ends = np.searchsorted(frame, np.arange(1, len(chars) + 1)).tolist()
         logp = chars[frame, token].tolist()
         text = [self.letters[i] for i in token.tolist()]
@@ -123,12 +128,14 @@ class BeamLM:
 
 def _vocabulary(lm_path: Path) -> list[str]:
     """Every word of a KenLM binary: the file ends with the vocabulary strings, NUL-terminated, from <unk>
-    (a later word may end in "<unk>", so the first match is the start)."""
+    (a later word may end in "<unk>", so the first match is the start). The count at byte 108 of a format-5
+    header is checked, so a file laid out differently fails here instead of yielding a wrong word list."""
     with open(lm_path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
         start = m.find(b"<unk>\0")
-        if start < 0:
-            raise ValueError(f"{lm_path} has no vocabulary strings")
-        return m[start:].decode("utf-8", errors="replace").split("\0")[:-1]
+        words = m[start:].decode("utf-8", errors="replace").split("\0")[:-1] if start >= 0 else []
+        if len(m) < 116 or len(words) != struct.unpack_from("<Q", m, 108)[0]:
+            raise ValueError(f"{lm_path} is not a KenLM binary with a vocabulary")
+        return words
 
 
 def _frequent(lm_path: Path, words: list[str]) -> list[str]:
