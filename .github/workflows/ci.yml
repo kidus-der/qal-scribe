@@ -3,6 +3,9 @@ on:
   push:
     branches: [main, "ws/**"]
   pull_request:
+  workflow_call: # the release workflow runs the same checks before publishing
+permissions:
+  contents: read
 jobs:
   test:
     strategy:
@@ -18,3 +21,18 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check
       - run: uv run pytest
+      - name: Wheel builds, ships NOTICE and runs
+        shell: bash
+        run: |
+          uv build --wheel
+          unzip -l dist/*.whl | grep 'qal_scribe/NOTICE'
+          # --version needs none of torch; the CPU build keeps the Linux install small
+          if [ "$RUNNER_OS" = Linux ]; then export UV_TORCH_BACKEND=cpu; fi
+          uvx --from dist/*.whl qal-scribe --version
+      - name: Doctor renders its table
+        shell: bash
+        run: |
+          # A CI machine has no microphone, so exit code 1 ("blocked") is expected; a crash is not.
+          out=$(uv run qal-scribe doctor || true)
+          echo "$out"
+          echo "$out" | grep -E 'Ready to dictate|Dictation is blocked'

@@ -1,0 +1,46 @@
+# qal-scribe settings. Every line below is commented out and shows the default (except `device`, which is
+# automatic when unset): remove the leading "# " from a line to change that setting. Run `qal-scribe doctor` after editing to check the file.
+
+# Language to dictate (`qal-scribe models` lists the available ones).
+# language = "amh"
+
+# Push-to-talk keys: hold to record, release to paste. Use pynput key names such as alt_r (Right Option),
+# ctrl_r (Right Control), cmd_r, shift_r, alt_l or f13.
+# dictate_key = "alt_r"
+# Speech to English text. Set to "" to turn this key off.
+# translate_key = "ctrl_r"
+
+# Where the model runs: "mps" (Apple GPU), "cuda" or "cpu". Leave this line out to use the fastest one
+# available (the default); the value below is only an example.
+# device = "cpu"
+
+# Decode with the model's language model when it ships one: a little more accurate.
+# lm = true
+
+# Text clean-up after transcription.
+# Write spoken numbers as digits.
+# numbers_to_digits = false
+# Spell sound-alike letters (ሀ ሐ ኀ, ሰ ሠ, አ ዐ, ጸ ፀ) the same way everywhere.
+# merge_homophones = false
+# Add punctuation with simple rules. Experimental: expect mistakes.
+# punctuation = false
+# Your own corrections, one `heard => wanted` per line (lines starting with # are ignored).
+# words_file = "~/.config/qal-scribe/words.txt"
+
+# Seconds to wait before putting your clipboard back after pasting. Raise it if an app pastes
+# your old clipboard instead of the dictated text.
+# restore_delay = 0.5
+
+# Play a short sound when recording starts and stops.
+# sounds = true
+
+# Microphone: part of its name (e.g. "MacBook Pro Microphone") or its number. Leave this line out to use the
+# system default (the default); `qal-scribe doctor` lists the microphones it can see.
+# mic = "MacBook Pro Microphone"
+
+# Show a live draft of the text while you are still speaking.
+# preview = true
+
+# Terminal UI.
+# theme = "qal"
+# compact = false

@@ -1,3 +1,4 @@
 """qal-scribe: on-device push-to-talk dictation for Amharic."""
+from importlib.metadata import version
 
-__version__ = "0.1.0.dev0"
+__version__ = version("qal-scribe")  # single source: `version` in pyproject.toml

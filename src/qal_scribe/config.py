@@ -28,6 +28,22 @@ class Config:
     preview: bool = True  # show a live draft while recording
 
 
+# What TOML must hold for each field type; TOML has no null, so "str | None" fields are strings too.
+KINDS = {bool: ("true or false", bool), float: ("a number", (int, float)), Path: ("text in quotes", str)}
+
+
+def check_types(data: dict, path: Path) -> None:
+    """Raise ValueError for a value of the wrong type: `restore_delay = "0.5"` would otherwise pass every
+    check and then crash at paste time, after the clipboard was overwritten."""
+    for f in fields(Config):
+        if f.name not in data:
+            continue
+        value = data[f.name]
+        what, types = KINDS.get(f.type, ("text in quotes", str))
+        if not isinstance(value, types) or (f.type is not bool and isinstance(value, bool)):
+            raise ValueError(f"{path}: {f.name} must be {what}, got {value!r}")
+
+
 def load(path: Path | None = None) -> Config:
     path = path or config_dir() / "config.toml"
     if not path.exists():
@@ -37,6 +53,7 @@ def load(path: Path | None = None) -> Config:
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"unknown keys in {path}: {', '.join(sorted(unknown))}")
+    check_types(data, path)
     if "words_file" in data:
         data["words_file"] = Path(data["words_file"]).expanduser()
     return Config(**data)
