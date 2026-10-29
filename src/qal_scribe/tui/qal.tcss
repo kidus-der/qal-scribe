@@ -1,0 +1,159 @@
+/* One accent, rounded hairline borders, the state pill sets the colour of the stage border. */
+
+Screen {
+    background: $background;
+    layout: vertical;
+}
+
+/* header */
+#top {
+    height: 1;
+    padding: 0 2;
+}
+#brand {
+    width: auto;
+}
+#status {
+    width: 1fr;
+    padding: 0 2;
+    color: $text-muted;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+#pill {
+    width: auto;
+    padding: 0 1;
+    text-style: bold;
+    color: $background;
+    background: $primary;
+}
+
+/* stage */
+#stage {
+    height: 35%;
+    min-height: 9;
+    max-height: 14;
+    margin: 1 1 0 1;
+    padding: 0 2;
+    background: $surface;
+    border: round $primary 60%;
+    border-title-color: $text-muted;
+    border-title-style: bold;
+    border-subtitle-color: $text-muted;
+}
+#reading {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    align: center middle;
+}
+#hero-title {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+}
+#hero {
+    width: 100%;
+    text-align: center;
+    color: $text-muted;
+}
+#transcript {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $text;
+}
+
+#stage.-live #transcript {
+    text-style: italic;
+}
+
+/* history */
+#history-panel {
+    height: 1fr;
+    margin: 0 1;
+    padding: 0 1;
+    background: $surface;
+    border: round $border;
+    border-title-color: $text-muted;
+    border-title-style: bold;
+    border-subtitle-color: $text-muted;
+}
+#history {
+    height: 1fr;
+    background: transparent;
+}
+#history-empty {
+    height: 1fr;
+    content-align: center middle;
+    color: $text-disabled;
+}
+HistoryRow {
+    height: auto;
+    padding: 0 1;
+    background: transparent;
+    layout: horizontal;
+    & > Static { height: auto; }
+    & .time { width: 9; color: $text-muted; }
+    & .mode { width: 9; color: $text-muted; }
+    & .text { width: 1fr; color: $text; }
+    & .empty { color: $text-disabled; text-style: italic; }
+    & .stats { width: auto; padding: 0 2; color: $text-muted; }
+    & .paste { width: 1; }
+    & .ok { color: $accent; }
+    & .no { color: $warning; }
+    &.-highlight { background: $primary 20%; }
+}
+#history:focus > HistoryRow.-highlight { background: $primary 35%; }
+
+/* footer */
+#bottom {
+    height: 1;
+}
+Footer {
+    dock: none;
+    width: 1fr;
+    background: transparent;
+    & .footer-key--key { color: $accent; background: transparent; text-style: bold; }
+    & .footer-key--description { color: $text-muted; background: transparent; }
+}
+#keys {
+    width: auto;
+    padding: 0 2;
+    color: $text-disabled;
+}
+
+/* state colours */
+Screen.-loading #pill { background: $warning 70%; }
+Screen.-loading #stage { border: round $warning 50%; }
+Screen.-ready #pill { background: $primary; }
+Screen.-recording #pill { background: $error; }
+Screen.-recording #stage { border: round $error; }
+Screen.-transcribing #pill { background: $warning; }
+Screen.-transcribing #stage { border: round $warning; }
+Screen.-translating #pill { background: $secondary; }
+Screen.-translating #stage { border: round $secondary; }
+Screen.-failed #pill { background: $error; }
+Screen.-failed #stage { border: round $error; }
+
+/* narrow terminals: hotkey reminder moves out of the footer */
+Screen.-narrow #keys { display: none; }
+
+/* compact: a 3-5 line strip (header, meter, up to two text lines, footer) for a small always-visible window */
+Screen.-compact {
+    & #top { padding: 0 1; }
+    & #history-panel, & #keys, & #hero-title { display: none; }
+    & #stage {
+        height: 1fr;
+        min-height: 0;
+        max-height: 3;
+        margin: 0;
+        padding: 0 1;
+        border: none;
+        background: transparent;
+    }
+    & Meter { height: 1; }
+    & #reading { overflow-y: hidden; align: left top; }
+    & #hero, & #transcript { text-align: left; padding: 0; }
+    &.-tiny #bottom { display: none; }
+}
