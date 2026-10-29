@@ -1,7 +1,8 @@
 """Real-model tests. Excluded by default; run: uv run python scripts/gpu_lock.py -- uv run pytest -m model
 
-The two clips are the maintainer's local recordings; the tests skip where they are absent.
+The two clips are local recordings under $QAL_TEST_AUDIO; the tests skip where they are absent.
 """
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,7 @@ from qal_scribe.textnorm import edit_distance, normalize
 
 pytestmark = pytest.mark.model
 
-AMHARIC = Path("~/Amharic")
+AMHARIC = Path(os.environ.get("QAL_TEST_AUDIO", "~/Amharic")).expanduser()
 SHORT = AMHARIC / "hohe-asr-amharic/recordings/20261027-163048.wav"
 LONG = AMHARIC / "mms-tts-amh/outputs/coffee.wav"  # 42.7 s synthetic speech
 
