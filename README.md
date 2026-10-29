@@ -117,8 +117,12 @@ homophone letters and drops punctuation):
 
 | Decoding | CER | WER |
 |---|---|---|
-| greedy (the model alone) | CER_GREEDY | WER_GREEDY |
-| with the language model (default) | CER_LM | WER_LM |
+| greedy (the model alone) | 6.5 % | 17.2 % |
+| with the language model (default) | 6.0 % | 14.6 % |
+
+The language model removes about one word error in seven and adds about 10 ms per clip. These numbers are for
+read speech; expect more errors with background noise, fast speech, names and English words (add those to your
+words file).
 
 ## More languages (experimental)
 
