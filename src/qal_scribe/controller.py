@@ -51,7 +51,7 @@ class Controller:
 
     def keys(self) -> dict[str, ev.Mode]:
         keys: dict[str, ev.Mode] = {self.cfg.dictate_key: "dictate"}
-        if self.cfg.translate_key:
+        if self.cfg.translation and self.cfg.translate_key:
             keys[self.cfg.translate_key] = "translate"
         return keys
 
@@ -205,6 +205,8 @@ class Controller:
         the mode the recording started with, so `toggle --translate` then `toggle` still translates."""
         if self.hotkeys is None:
             raise RuntimeError("still loading the model; try again in a moment")  # the client prints this
+        if mode == "translate" and not self.cfg.translation:
+            raise RuntimeError("translation is off (translation = false in the config, or --no-translate)")
         if self.recorder.active:
             self._stop_recording()
         else:
@@ -253,7 +255,7 @@ class Controller:
     def _new_translator(self):
         from qal_scribe.translate import Translator
 
-        translator = Translator(self.engine.device)
+        translator = Translator(self.engine.device, model=self.cfg.translation_model)
         translator.load()
         return translator
 

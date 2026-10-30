@@ -9,8 +9,15 @@
 # cmd_r (Right Command), ctrl_r (Right Control), shift_r, alt_l or f13.
 # dictate_key = "alt_r"
 # Speech to English text. Default: cmd_r (Right Command) on macOS, ctrl_r (Right Control) on Linux, because Apple
-# keyboards have no Right Control. Set to "" to turn this key off; the translation model (2.5 GB) is then never fetched.
+# keyboards have no Right Control. Set to "" to turn this key off; the translation model is then never fetched.
 # translate_key = "cmd_r"
+
+# Translation on or off. false: no translate key, and the translation model is never downloaded or loaded
+# (saves 2.5 GB of disk and some memory on small machines). `qal-scribe --no-translate` does the same for one run.
+# translation = true
+# Which model translates: "nllb-600m" (2.5 GB download, fast, the default) or "nllb-1.3b" (5.5 GB).
+# See docs/translation.md for how they compare; both are non-commercial.
+# translation_model = "nllb-600m"
 
 # Where the model runs: "mps" (Apple GPU), "cuda" or "cpu". Leave this line out to use the fastest one
 # available (the default); the value below is only an example.

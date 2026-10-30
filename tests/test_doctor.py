@@ -6,6 +6,7 @@ import pytest
 from qal_scribe import doctor, models
 from qal_scribe.config import Config
 from qal_scribe.doctor import Check
+from qal_scribe.translate import TRANSLATION_MODELS
 
 SPEC = models.MODELS["amh"]
 
@@ -19,11 +20,12 @@ def test_models_not_cached_warn_then_ok(hf_cache):
     checks = doctor.check_models(cfg)
     assert [c.status for c in checks] == ["warn", "warn", "warn"]
     assert all("models download" in c.fix for c in checks)
-    from qal_scribe.translate import Translator
+    from qal_scribe.translate import TRANSLATION_MODELS
 
+    nllb = TRANSLATION_MODELS["nllb-600m"]
     hf_cache(SPEC.repo, SPEC.revision, "model.safetensors")
     hf_cache(SPEC.repo, SPEC.revision, SPEC.lm_file)
-    hf_cache(Translator.MODEL, Translator.REVISION, "pytorch_model.bin")
+    hf_cache(nllb.repo, nllb.revision, "pytorch_model.bin")
     assert [c.status for c in doctor.check_models(cfg)] == ["ok", "ok", "ok"]
 
 
@@ -43,6 +45,33 @@ def test_models_cached_at_another_revision_do_not_count(hf_cache):
 def test_disabled_features_are_not_nagged_about(hf_cache):
     checks = doctor.check_models(Config(lm=False, translate_key=""))
     assert status(checks, "Language model") == "ok" and status(checks, "Translation model") == "ok"
+
+
+def test_translation_off_is_ok_not_a_warning(hf_cache):
+    check = doctor.check_translation(Config(translation=False))
+    assert check.status == "ok" and check.detail == "off (translation = false)"
+
+
+def test_doctor_checks_the_chosen_translation_model(hf_cache):
+    big = TRANSLATION_MODELS["nllb-1.3b"]
+    cfg = Config(translation_model="nllb-1.3b")
+    check = doctor.check_translation(cfg)
+    assert check.status == "warn" and big.repo in check.detail and "5.5 GB" in check.detail
+    hf_cache(big.repo, big.revision, "pytorch_model.bin")
+    assert doctor.check_translation(cfg).status == "ok"
+
+
+def test_unknown_translation_model_is_a_config_problem():
+    assert "nllb-600m, nllb-1.3b" in doctor.config_problem(Config(translation_model="gpt"))
+
+
+def test_disk_need_grows_with_the_translation_model(monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda _: type("Usage", (), {"free": 8_000_000_000})())
+    assert doctor.check_disk(Config()).status == "ok"
+    assert doctor.check_disk(Config(translation_model="nllb-1.3b")).status == "warn"
+    assert doctor.check_disk(Config(translation_model="nllb-1.3b", translation=False)).status == "ok"
 
 
 def test_check_config(tmp_path):

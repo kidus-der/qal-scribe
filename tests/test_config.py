@@ -30,6 +30,8 @@ def test_words_file_expands_user(tmp_path):
     ("words_file = 5", "words_file must be text in quotes"),
     ("device = 0", "device must be text in quotes"),
     ('translate_key = ["ctrl_r"]', "translate_key must be text in quotes"),
+    ('translation = "no"', "translation must be true or false"),
+    ("translation_model = 3", "translation_model must be text in quotes"),
 ])
 def test_wrong_type_is_an_error_naming_the_key(tmp_path, line, message):
     p = tmp_path / "config.toml"

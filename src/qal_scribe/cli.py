@@ -27,6 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"qal-scribe {__version__}")
     p.add_argument("--plain", action="store_true", help="line output instead of the TUI")
     p.add_argument("--config", help="path to config.toml")
+    p.add_argument("--no-translate", action="store_true",
+                   help="dictate only: no translate key, and the translation model is neither fetched nor loaded")
     sub = p.add_subparsers(dest="command")
 
     def command(parent, name: str, text: str) -> argparse.ArgumentParser:
@@ -36,7 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     m = command(sub, "models", "list available languages and models")
     d = command(m.add_subparsers(dest="models_command"), "download", "fetch model weights now (then it works offline)")
     d.add_argument("language", nargs="?", help="language code (default: the one in your config)")
-    d.add_argument("--translation", action="store_true", help="also fetch the Amharic -> English model (2.5 GB)")
+    d.add_argument("--translation", action="store_true", help="also fetch the Amharic -> English model\n"
+                   "(2.5 GB for the default, see `translation_model`)")
     c = command(sub, "config", "show the config file path")
     c.add_argument("--init", action="store_true", help="write a fully commented default config (never overwrites)")
     t = command(sub, "transcribe", "transcribe an audio file and print the text")
@@ -139,16 +142,16 @@ def cmd_models(args: argparse.Namespace) -> None:
     from qal_scribe.doctor import WEIGHT_FILES, is_cached
 
     if args.models_command != "download":
-        from qal_scribe.translate import Translator
+        from qal_scribe.translate import TRANSLATION_MODELS
 
-        def state(repo: str, revision: str) -> str:
-            return "cached" if is_cached(repo, revision, *WEIGHT_FILES) else "not downloaded"
+        def state(repo: str, revision: str, *files: str) -> str:
+            return "cached" if is_cached(repo, revision, *(files or WEIGHT_FILES)) else "not downloaded"
 
         rows = [("code", "language", "model", "licence", "state")]
         rows += [(s.language, s.language_name, s.repo, s.license + (" (experimental)" if s.experimental else ""),
                   state(s.repo, s.revision)) for s in models.MODELS.values()]
-        rows.append(("", "translation", Translator.MODEL, "CC-BY-NC-4.0 (Amharic -> English)",
-                     state(Translator.MODEL, Translator.REVISION)))
+        rows += [("", f"translation {key}", t.repo, f"{t.license} (Amharic -> English)",
+                  state(t.repo, t.revision, t.weights)) for key, t in TRANSLATION_MODELS.items()]
         widths = [max(len(row[i]) for row in rows) for i in range(4)]
         for row in rows:
             print("  ".join(cell.ljust(width) for cell, width in zip(row, widths)), row[4], sep="  ")
@@ -160,10 +163,19 @@ def cmd_models(args: argparse.Namespace) -> None:
         print(f"Fetching {spec.language_name} model {spec.repo} ({spec.license})...", flush=True)
         print(f"-> {models.download(spec, with_lm=cfg.lm)}")
         if args.translation:
-            from qal_scribe.translate import Translator
+            from qal_scribe import translate
 
-            print(f"Fetching translation model {Translator.MODEL} (CC-BY-NC-4.0, non-commercial)...", flush=True)
-            print(f"-> {download_translation()}")
+            t = translation_spec(cfg)
+            print(f"Fetching translation model {t.repo} ({t.license})...", flush=True)
+            print(f"-> {translate.download(cfg.translation_model)}")
+
+
+def translation_spec(cfg: Config):
+    from qal_scribe.translate import TRANSLATION_MODELS
+
+    if cfg.translation_model not in TRANSLATION_MODELS:
+        fail(f"bad config: translation_model {cfg.translation_model!r}: use one of {', '.join(TRANSLATION_MODELS)}")
+    return TRANSLATION_MODELS[cfg.translation_model]
 
 
 def cmd_about() -> None:
@@ -171,15 +183,6 @@ def cmd_about() -> None:
 
     print(f"qal-scribe {__version__}, MIT licence\n")
     print(files("qal_scribe").joinpath("NOTICE").read_text(encoding="utf-8"))
-
-
-def download_translation() -> str:
-    from huggingface_hub import snapshot_download
-
-    from qal_scribe.translate import Translator
-
-    patterns = ["*.json", "*.bin", "*.model"]  # same files Translator.load() asks for
-    return snapshot_download(Translator.MODEL, revision=Translator.REVISION, allow_patterns=patterns)
 
 
 def resample(audio, rate: int, to: int):
@@ -195,6 +198,8 @@ def resample(audio, rate: int, to: int):
 def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
     if not Path(file).is_file():
         fail(f"no such file: {file}")
+    if translate and not cfg.translation:
+        fail("translation is off (translation = false in the config, or --no-translate); remove --translate")
     import soundfile as sf
 
     from qal_scribe import postprocess
@@ -226,7 +231,7 @@ def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
 
             if cfg.language not in NLLB_CODES:
                 fail(f"no translation for {spec_for(cfg.language).language_name}; it knows {', '.join(NLLB_CODES)}")
-            tr = Translator(engine.device)
+            tr = Translator(engine.device, model=cfg.translation_model)
             tr.load()
             text = tr.translate([postprocess.process(s, cfg, words) for s in result.sentences], cfg.language)
     print(text)
@@ -237,9 +242,8 @@ def fetch_missing_models(cfg: Config, translation: bool = False, translation_req
     friendly_download_errors(), and the hub's progress bars only look right in a plain terminal.
     Says so on stderr, which keeps `transcribe`'s stdout to the text alone. translation_required=False: a
     failed translation download is a warning (dictation still works offline)."""
-    from qal_scribe import models
+    from qal_scribe import models, translate
     from qal_scribe.doctor import WEIGHT_FILES, is_cached
-    from qal_scribe.translate import Translator
 
     spec = spec_for(cfg.language)
     has_weights = is_cached(spec.repo, spec.revision, *WEIGHT_FILES)
@@ -249,11 +253,14 @@ def fetch_missing_models(cfg: Config, translation: bool = False, translation_req
               "(Ctrl+C cancels)...", file=sys.stderr, flush=True)
         with friendly_download_errors(), interruptible():
             models.download(spec, with_lm=cfg.lm)
-    if translation and not is_cached(Translator.MODEL, Translator.REVISION, *WEIGHT_FILES):
-        print(f"First run: fetching the translation model {Translator.MODEL} (CC-BY-NC-4.0), about 2.5 GB "
+    if not translation:
+        return
+    t = translation_spec(cfg)
+    if not is_cached(t.repo, t.revision, t.weights):
+        print(f"First run: fetching the translation model {t.repo} ({t.license}), about {t.size_gb:g} GB "
               "(Ctrl+C cancels)...", file=sys.stderr, flush=True)
         with friendly_download_errors(required=translation_required), interruptible():
-            download_translation()
+            translate.download(cfg.translation_model)
 
 
 def quiet_progress_bars() -> None:
@@ -275,8 +282,8 @@ def cmd_run(cfg: Config, plain: bool) -> None:
     if not sys.platform.startswith(("darwin", "linux")):
         fail(f"{sys.platform} is not supported (macOS and Linux only)")
     check_config(cfg)
-    # The translation model too: fetched inside the TUI it would be 2.5 GB behind a spinner, on a key press.
-    fetch_missing_models(cfg, translation=bool(cfg.translate_key), translation_required=False)
+    # The translation model too: fetched inside the TUI it would be GBs behind a spinner, on a key press.
+    fetch_missing_models(cfg, translation=cfg.translation and bool(cfg.translate_key), translation_required=False)
     if plain:
         from qal_scribe.plain import run
 
@@ -312,8 +319,13 @@ def main(argv: list[str] | None = None) -> None:
 
                 sys.exit(send_toggle("translate" if args.translate else "dictate"))
             case "transcribe":
-                cmd_transcribe(load_config(path, bool(args.config)), args.file, args.translate)
+                cfg = load_config(path, bool(args.config))
+                cfg.translation = cfg.translation and not args.no_translate
+                cmd_transcribe(cfg, args.file, args.translate)
             case _:
-                cmd_run(load_config(path, bool(args.config)), args.plain)
+                cfg = load_config(path, bool(args.config))
+                if args.no_translate:
+                    cfg.translation = False
+                cmd_run(cfg, args.plain)
     except KeyboardInterrupt:
         sys.exit(130)

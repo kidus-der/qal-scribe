@@ -23,6 +23,8 @@ class Config:
     language: str = "amh"
     dictate_key: str = "alt_r"  # pynput Key name
     translate_key: str | None = field(default_factory=default_translate_key)  # None disables the translate hotkey
+    translation: bool = True  # False: no translate hotkey, and the translation model is never fetched or loaded
+    translation_model: str = "nllb-600m"  # see translate.TRANSLATION_MODELS
     device: str | None = None  # None = auto (mps > cuda > cpu)
     lm: bool = True  # use the model's language model when available
     numbers_to_digits: bool = False

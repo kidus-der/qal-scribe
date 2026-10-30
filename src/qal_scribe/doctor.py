@@ -20,6 +20,7 @@ from rich.table import Table
 from qal_scribe import config as config_mod
 from qal_scribe import models
 from qal_scribe.config import Config
+from qal_scribe.translate import TRANSLATION_MODELS
 
 WEIGHT_FILES = ("model.safetensors", "pytorch_model.bin")
 MIN_FREE_GB = 6  # all models together are about 5.5 GB
@@ -55,6 +56,8 @@ def config_problem(cfg: Config) -> str | None:
         config_mod.load_words(cfg)
     except ValueError as e:
         return str(e)
+    if cfg.translation_model not in TRANSLATION_MODELS:
+        return f"translation_model {cfg.translation_model!r}: use one of {', '.join(TRANSLATION_MODELS)}"
     if not math.isfinite(cfg.restore_delay) or cfg.restore_delay < 0:
         return f"restore_delay is {cfg.restore_delay}: it must be a number of seconds, 0 or more"
     if cfg.device and cfg.device.split(":")[0] not in (available := available_devices()):
@@ -185,17 +188,18 @@ def check_models(cfg: Config) -> list[Check]:
 
 
 def check_translation(cfg: Config) -> Check:
-    from qal_scribe.translate import Translator
-
+    if not cfg.translation:
+        return Check("Translation model", "ok", "off (translation = false)")
     if not cfg.translate_key:
         return Check("Translation model", "ok", "off (translate_key is empty)")
-    if is_cached(Translator.MODEL, Translator.REVISION, *WEIGHT_FILES):
-        return Check("Translation model", "ok", f"{Translator.MODEL} cached")
-    return Check("Translation model", "warn", f"{Translator.MODEL} not downloaded (about 2.5 GB)",
+    spec = TRANSLATION_MODELS[cfg.translation_model]
+    if is_cached(spec.repo, spec.revision, spec.weights):
+        return Check("Translation model", "ok", f"{spec.repo} cached")
+    return Check("Translation model", "warn", f"{spec.repo} not downloaded (about {spec.size_gb:g} GB)",
                  "`qal-scribe models download --translation`, or let the first translation fetch it")
 
 
-def check_disk() -> Check:
+def check_disk(cfg: Config | None = None) -> Check:
     from huggingface_hub.constants import HF_HUB_CACHE
 
     folder = Path(HF_HUB_CACHE)
@@ -203,8 +207,11 @@ def check_disk() -> Check:
         folder = folder.parent
     free = shutil.disk_usage(folder).free / 1e9
     detail = f"{free:.0f} GB free where models are stored"
-    if free < MIN_FREE_GB:
-        return Check("Disk space", "warn", detail, f"models need up to {MIN_FREE_GB} GB; free some space or set HF_HOME")
+    need = MIN_FREE_GB
+    if cfg and cfg.translation:  # the speech models are about 3.5 GB
+        need = max(need, 3.5 + TRANSLATION_MODELS[cfg.translation_model].size_gb)
+    if free < need:
+        return Check("Disk space", "warn", detail, f"models need up to {need:g} GB; free some space or set HF_HOME")
     return Check("Disk space", "ok", detail)
 
 
@@ -213,7 +220,7 @@ def run(path: Path) -> int:
     with console.status("checking…"):  # the first torch import after an install takes ~10 s
         config_check, cfg = check_config(path)
         checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_microphone_permission(),
-                  check_paste(), check_input_monitoring(), config_check, *check_models(cfg), check_disk()]
+                  check_paste(), check_input_monitoring(), config_check, *check_models(cfg), check_disk(cfg)]
     checks = [c for c in checks if c]
     table = Table(title="qal-scribe doctor", title_justify="left", header_style="bold")
     with_fix = any(c.fix for c in checks)
