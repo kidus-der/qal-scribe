@@ -53,6 +53,10 @@
 # Show a live draft of the text while you are still speaking.
 # preview = true
 
+# Show a small floating "Listening" / "Transcribing" pill near the bottom of the screen while you hold the key,
+# so you can see it works with the terminal hidden. macOS only; ignored on Linux.
+# indicator = true
+
 # Terminal UI. Themes: qal, qal-light, or a built-in Textual theme such as nord, gruvbox, dracula,
 # tokyo-night, catppuccin-mocha, solarized-light or textual-dark (press t in the window to try them all).
 # theme = "qal"

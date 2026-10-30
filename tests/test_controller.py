@@ -586,3 +586,71 @@ def test_failed_clip_plays_the_error_cue(monkeypatch, tmp_path):
     c.stop()
     worker.join(3)
     assert cues == ["error"]
+
+
+# --- recording indicator ---------------------------------------------------------------------------------------
+
+
+class FakeIndicator:
+    def __init__(self, on_error):
+        self.on_error, self.seen, self.closed = on_error, [], False
+
+    def __call__(self, event):
+        self.seen.append(event)
+
+    def close(self):
+        self.closed = True
+
+
+class BrokenIndicator(FakeIndicator):
+    def __init__(self, on_error):
+        super().__init__(on_error)
+        on_error("recording indicator unavailable (x); dictation works without it")
+
+
+class FakePushToTalk(FakeHotkeys):
+    reason = None
+
+    def __init__(self, *args):
+        pass
+
+    def start(self):
+        pass
+
+
+def start_with_fakes(monkeypatch, tmp_path, platform="darwin", indicator=True, indicator_cls=FakeIndicator):
+    c, out = make(monkeypatch, tmp_path)
+    c.cfg.indicator = indicator
+    monkeypatch.setattr(controller.sys, "platform", platform)
+    monkeypatch.setattr(controller, "Recorder", lambda **kw: FakeRecorder())
+    monkeypatch.setattr(controller.ipc, "serve", lambda on_toggle: None)
+    monkeypatch.setattr(controller.paste, "can_paste", lambda: (True, ""))
+    monkeypatch.setattr(controller, "PushToTalk", FakePushToTalk)
+    monkeypatch.setattr(controller, "Indicator", indicator_cls)
+    c.recorder = None  # start() builds its own
+    return c, out
+
+
+def test_indicator_gets_every_event_on_macos(monkeypatch, tmp_path):
+    c, out = start_with_fakes(monkeypatch, tmp_path)
+    c.start()
+    c._start_recording("dictate")
+    c._stop_recording()
+    assert kinds(out) == ["Loading", "Ready", "RecordingStarted", "RecordingStopped"]
+    assert kinds(c._indicator.seen) == kinds(out)[1:]  # it starts after the model load
+    c.stop()
+    assert c._indicator.closed
+
+
+@pytest.mark.parametrize(("platform", "enabled"), [("linux", True), ("darwin", False)])
+def test_no_indicator_on_linux_or_when_turned_off(monkeypatch, tmp_path, platform, enabled):
+    c, _ = start_with_fakes(monkeypatch, tmp_path, platform=platform, indicator=enabled)
+    c.start()
+    assert c._indicator is None
+
+
+def test_indicator_failure_is_one_notice_and_dictation_still_runs(monkeypatch, tmp_path):
+    c, out = start_with_fakes(monkeypatch, tmp_path, indicator_cls=BrokenIndicator)
+    c.start()
+    c.handle("dictate", AUDIO)
+    assert kinds(out) == ["Loading", "Notice", "Ready", "Transcribed"] and out[1].level == "warning"

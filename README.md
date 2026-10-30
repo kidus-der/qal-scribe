@@ -111,6 +111,7 @@ most likely to change:
 | `punctuation` | `false` | add ። ? and ፣ by rule (**experimental**, see below) |
 | `lm` | `true` | decode with the language model; `false` is plain greedy decoding |
 | `sounds` | `true` | short sound when recording starts and stops |
+| `indicator` | `true` | macOS: a small floating pill, "Listening" while you hold the key and "Transcribing…" after, so you can see it works while the terminal is hidden; it never takes focus. Ignored on Linux |
 
 Run `qal-scribe doctor` after editing to check the file.
 
