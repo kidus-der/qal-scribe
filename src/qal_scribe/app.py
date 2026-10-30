@@ -84,7 +84,8 @@ def summarize(message: str) -> str:
     if message.startswith("cannot type text"):
         return "No way to type text yet: it goes to the clipboard · press d"
     first = re.split(r"[;:]", message, maxsplit=1)[0].strip()
-    return first if len(first) <= 70 else first[:69] + "…"
+    first = first if len(first) <= 62 else first[:61] + "…"
+    return f"{first} · press d"
 
 
 def mic_name(device: str | int | None = None) -> str | None:
@@ -337,9 +338,10 @@ class QalApp(App):
         if not self.info:
             return Content(name)
         model = self.info.model.rsplit("/", 1)[-1]
-        translation = f"→EN {self.cfg.translation_model}" if self.cfg.translation else "translation off"
-        return Content(" · ".join(p for p in [name, model, self.info.device, "LM on" if self.info.lm else "LM off",
-                                              translation] if p))
+        on = self.cfg.translation and self.cfg.translate_key
+        translation = f"→EN {self.cfg.translation_model}" if on else "translation off"
+        lm = "LM on" if self.info.lm else ""  # off is the default and there is no room for it at 80 columns
+        return Content(" · ".join(p for p in [name, model, self.info.device, lm, translation] if p))
 
     def language_name(self) -> str:
         spec = models.MODELS.get(self.language)

@@ -162,6 +162,7 @@ class SetupScreen(Screen[bool]):
 
     AUTO_FOCUS = "#download:enabled, #continue"
     BINDINGS = [  # noqa: RUF012 (Textual convention)
+        Binding("enter", "download", "Download"),
         Binding("c,escape", "continue", "Continue"),
         Binding("y", "copy_command", "Copy command"),
     ]
@@ -213,7 +214,7 @@ class SetupScreen(Screen[bool]):
                     with Horizontal(id="tr-row"):
                         yield Switch(self.cfg.translation, id="tr-switch")
                         yield Static("Translation to English")
-                    yield Select([(f"{k}  ·  {t.size_gb:g} GB  ·  {t.license}", k)
+                    yield Select([(f"{k}  ·  {t.size_gb:g} GB", k)
                                   for k, t in TRANSLATION_MODELS.items()], value=self.cfg.translation_model,
                                  allow_blank=False, id="tr-model", compact=True)
                     yield Static("", id="tr-info")
@@ -322,12 +323,14 @@ class SetupScreen(Screen[bool]):
         if self.ask:
             t = TRANSLATION_MODELS[self.cfg.translation_model]
             terms = "non-commercial use only" if "NC" in t.license else "free to use commercially"
-            self.query_one("#tr-info", Static).update(f"{t.license}, {terms}" if self.cfg.translation else
+            self.query_one("#tr-info", Static).update(terms if self.cfg.translation else
                                                       "Off: no translate key, nothing to download")
         todo = [i for i in self.todo if not i.cached()]
         download = self.query_one("#download", Button)
         download.disabled = self.running or not todo
         download.label = "Retry" if self.errors and todo else "Download"
+        self.query_one("#continue", Button).disabled = self.running  # leaving would start the model load beside the download
+        self.refresh_bindings()
 
     def item_line(self, item: Item) -> Content:
         head = Content.assemble((item.title, "bold"), f"  {item.license}")
@@ -336,7 +339,8 @@ class SetupScreen(Screen[bool]):
         if item.cached():
             return Content.assemble(head, "\n", ("✓ downloaded", "$success"))
         size = self.sizes.get(item.key, "…")
-        size = "size unknown, offline" if size is None else gb(size) if isinstance(size, int) else size
+        about = f"about {item.estimate_gb:g} GB"
+        size = f"{about}, offline" if size is None else about if size == "…" else gb(size)
         if item.key in self.progress:
             done, total = self.progress[item.key]
             filled, rest = progress_bar(round(100 * done / total) if total else 0, 24)
@@ -404,10 +408,21 @@ class SetupScreen(Screen[bool]):
             self.dismiss(True)
 
     def action_continue(self) -> None:
-        self.dismiss(True)
+        if not self.running:
+            self.dismiss(True)
 
-    def check_action(self, action: str, parameters: tuple) -> bool:
-        return sys.platform != "darwin" if action == "copy_command" else True
+    def action_download(self) -> None:
+        self.start_download()
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        match action:
+            case "copy_command":
+                return sys.platform != "darwin"
+            case "continue":
+                return None if self.running else True
+            case "download":
+                return not self.running and any(not i.cached() for i in self.todo)
+        return True
 
 
 # -- settings ---------------------------------------------------------------------------------------------
@@ -425,6 +440,8 @@ class KeyCapture(ModalScreen[str | None]):
     KeyCapture #capture-error { color: $error; }
     KeyCapture Select, KeyCapture Button { margin-top: 1; }
     """
+
+    TYPING = frozenset({"space", "enter", "tab", "backspace", "delete", "up", "down", "left", "right"})
 
     class Heard(Message):
         def __init__(self, name: str | None) -> None:
@@ -459,7 +476,7 @@ class KeyCapture(ModalScreen[str | None]):
         self.post_message(self.Heard(key.name if isinstance(key, keyboard.Key) else None))
 
     def on_key_capture_heard(self, message: Heard) -> None:
-        if message.name is None:
+        if message.name is None or message.name in self.TYPING:
             self.query_one("#capture-error", Static).update(
                 "pick a key you never type with, such as Right Option or F13")
         elif message.name == "esc":
@@ -572,6 +589,7 @@ class SettingsScreen(Screen):
         super().__init__()
         self.cfg = cfg
         self.restart_needed = False
+        self.original: dict[str, object] = {}  # restart settings as they were when the screen opened
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
@@ -651,7 +669,8 @@ class SettingsScreen(Screen):
         elif key == "compact":
             self.app.base.set_class(value, "-compact")
         if not setting.live:
-            self.restart_needed = True
+            self.original.setdefault(key, old)
+            self.restart_needed = any(getattr(self.cfg, k) != v for k, v in self.original.items())
             self.refresh_bindings()
         if key in ("translation", "translation_model"):
             self.query_one("#help-translation", Static).update(self.help_line(SETTINGS[0]))

@@ -164,9 +164,10 @@ Screen.-narrow #mic { display: none; }  /* a cut-off "mic T…" helps nobody */
 Screen.-narrow #status { width: 1fr; padding: 0 2; }
 
 /* under 18 rows: a shorter stage, so the history keeps rows; before the compact block, which wins at 3-5 rows */
-Screen.-short #stage { min-height: 5; max-height: 7; }
+Screen.-short #stage { min-height: 6; max-height: 8; }
+Screen.-short Meter { height: 1; }  /* the rows go to the transcript and the live draft */
 Screen.-short #hero-title { display: none; }
-Screen.-short.-notes #stage { min-height: 6; }
+Screen.-short.-notes #stage { min-height: 7; }
 
 /* compact: a 3-5 line strip (header, meter, up to two text lines, footer) for a small always-visible window */
 Screen.-compact {

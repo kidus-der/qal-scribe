@@ -197,7 +197,7 @@ def test_choosing_a_model_is_saved_and_shows_its_licence(setup_env):
         app.screen.query_one("#tr-model").value = "madlad-3b"
         await pilot.pause()
         assert app.cfg.translation_model == "madlad-3b" and 'translation_model = "madlad-3b"' in config_file().read_text()
-        assert "Apache-2.0, free to use commercially" in screen_text(app)
+        assert "free to use commercially" in screen_text(app)
 
     drive(scenario, setup=True)
 
@@ -263,7 +263,7 @@ def test_sizes_that_cannot_be_looked_up_say_offline(setup_env, monkeypatch):
     monkeypatch.setattr(models, "missing_bytes", offline)
 
     async def scenario(app, fake, pilot):
-        await asyncio_wait(lambda: "size unknown, offline" in screen_text(app), pilot)
+        await asyncio_wait(lambda: "GB, offline" in screen_text(app), pilot)
 
     drive(scenario, setup=True)
 
@@ -687,3 +687,84 @@ def test_the_key_reminder_is_readable_in_the_light_theme():
     css = (Path(app_mod.__file__).parent / "tui" / "qal.tcss").read_text()
     keys = css[css.index("#keys {"):].split("}")[0]
     assert "$text-muted" in keys and "$text-disabled" not in keys
+
+
+# -- review fixes --------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["space", "enter", "tab", "backspace", "delete", "left", "up"])
+def test_capture_refuses_keys_you_type_with(name):
+    async def scenario(app, fake, pilot):
+        app.push_screen(KeyCapture("Dictate", None, False))
+        await pilot.pause()
+        app.screen.post_message(KeyCapture.Heard(name))
+        await pilot.pause()
+        assert isinstance(app.screen, KeyCapture) and "never type with" in screen_text(app)
+        app.screen.post_message(KeyCapture.Heard("f13"))
+        await pilot.pause()
+        assert not isinstance(app.screen, KeyCapture)
+
+    drive(scenario)
+
+
+def test_the_short_stage_shows_the_result_and_the_live_draft():
+    async def scenario(app, fake, pilot):
+        await send(pilot, ev.RecordingStarted("dictate"), ev.Partial("ቀጥታ ረቂቅ ጽሑፍ"))
+        assert "ቀጥታ ረቂቅ ጽሑፍ" in screen_text(app)
+        await send(pilot, ev.RecordingStopped("dictate", 3.2), done("የመጨረሻ ውጤት"))
+        assert "የመጨረሻ ውጤት" in screen_text(app).split("History")[0]
+
+    drive(scenario, size=(80, 14))
+
+
+def test_continue_is_off_while_a_download_runs(setup_env, monkeypatch):
+    monkeypatch.setattr(SetupScreen, "start_download", lambda self: setattr(self, "running", True) or self.show_items())
+
+    async def scenario(app, fake, pilot):
+        await pilot.pause()
+        app.screen.query_one("#download").press()
+        await pilot.pause()
+        await pilot.press("c")
+        await pilot.pause()
+        assert isinstance(app.screen, SetupScreen) and app.boot_thread is None
+        assert app.screen.query_one("#continue").disabled
+
+    drive(scenario, setup=True)
+
+
+def test_setup_fits_80x24_with_the_permissions_title_in_view(setup_env):
+    setup_env.checks = [NO_PASTE]
+
+    async def scenario(app, fake, pilot):
+        await pilot.pause()
+        text = screen_text(app)
+        assert "Permissions" in text and "Download" in text and "Continue" in text
+
+    drive(scenario, setup=True, size=(80, 24))
+
+
+def test_generic_callouts_point_at_setup():
+    assert app_mod.summarize("text insertion needs wtype").endswith("· press d")
+
+
+def test_switching_a_restart_setting_back_withdraws_the_restart_offer():
+    async def scenario(app, fake, pilot):
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.screen
+        switch = screen.query_one("#set-lm")
+        switch.toggle()
+        await pilot.pause()
+        assert screen.restart_needed
+        switch.toggle()
+        await pilot.pause()
+        assert not screen.restart_needed
+
+    drive(scenario)
+
+
+def test_status_line_says_translation_off_without_a_translate_key():
+    async def scenario(app, fake, pilot):
+        assert "translation off" in screen_text(app) and "→EN" not in screen_text(app)
+
+    drive(scenario, cfg=Config(translate_key=""), size=(100, 24))
