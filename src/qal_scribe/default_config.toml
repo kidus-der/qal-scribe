@@ -14,8 +14,8 @@
 # Translation on or off. false: no translate key, and the translation model is never downloaded or loaded
 # (saves 2.5 GB of disk and some memory on small machines). `qal-scribe --no-translate` does the same for one run.
 # translation = true
-# Which model translates: "nllb-600m" (2.5 GB download, fast, the default), "nllb-1.3b" (5.5 GB) or
-# "madlad-3b" (11.8 GB). See docs/translation.md for how they compare; the NLLB ones are non-commercial.
+# Which model translates: "nllb-600m" (2.5 GB download, fast, the default) or "nllb-1.3b" (5.5 GB).
+# See docs/translation.md for how they compare; both are non-commercial.
 # translation_model = "nllb-600m"
 
 # Where the model runs: "mps" (Apple GPU), "cuda" or "cpu". Leave this line out to use the fastest one

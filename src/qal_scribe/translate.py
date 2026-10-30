@@ -7,7 +7,7 @@ download(model) -> folder fetches the weights (what load() asks for).
 text gives "" without loading anything. Long text is split into sentences (and, for text without punctuation, into
 chunks of MAX_WORDS words) and translated as one batch. `language` is a qal-scribe language code; one NLLB does not
 know (Sidaama, Wolaytta) raises ValueError.
-Licence: the NLLB models are CC-BY-NC-4.0 (non-commercial), MADLAD is Apache-2.0; see NOTICE.
+Licence: the NLLB models are CC-BY-NC-4.0 (non-commercial); see NOTICE.
 """
 import re
 from dataclasses import dataclass
@@ -26,7 +26,6 @@ class TranslationSpec:
     patterns: tuple[str, ...]  # what to fetch: the repos also hold GGUF and duplicate weights we never read
     size_gb: float  # download size, for messages
     half: str  # torch dtype name used on mps/cuda
-    prefix: str = ""  # MADLAD takes the target language as a "<2en> " tag on the input; NLLB forces a start token
 
 
 TRANSLATION_MODELS: dict[str, TranslationSpec] = {
@@ -34,9 +33,6 @@ TRANSLATION_MODELS: dict[str, TranslationSpec] = {
                                  "CC-BY-NC-4.0", "pytorch_model.bin", ("*.json", "*.bin", "*.model"), 2.5, "float16"),
     "nllb-1.3b": TranslationSpec("facebook/nllb-200-distilled-1.3B", "7be3e24664b38ce1cac29b8aeed6911aa0cf0576",
                                  "CC-BY-NC-4.0", "pytorch_model.bin", ("*.json", "*.bin", "*.model"), 5.5, "float16"),
-    "madlad-3b": TranslationSpec("google/madlad400-3b-mt", "fa184c675da0b5c9e1c8694fccd4e12e2d422094", "Apache-2.0",
-                                 "model.safetensors", ("*.json", "*.safetensors", "spiece.model"), 11.8,
-                                 "bfloat16", "<2en> "),  # T5 overflows in float16
 }
 DEFAULT_MODEL = "nllb-600m"
 
@@ -79,11 +75,8 @@ class Translator:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
         path = download(self.name)
-        if self.spec.prefix:
-            self.tokenizer = AutoTokenizer.from_pretrained(path)
-        else:
-            self.tokenizer = AutoTokenizer.from_pretrained(path, src_lang=SRC_LANG)
-            self.target_id = self.tokenizer.convert_tokens_to_ids(TGT_LANG)
+        self.tokenizer = AutoTokenizer.from_pretrained(path, src_lang=SRC_LANG)
+        self.target_id = self.tokenizer.convert_tokens_to_ids(TGT_LANG)
         dtype = self.dtype or (getattr(torch, self.spec.half) if self.device in ("mps", "cuda") else torch.float32)
         model = AutoModelForSeq2SeqLM.from_pretrained(path, dtype=dtype).eval()
         try:
@@ -102,12 +95,8 @@ class Translator:
         self.load()
         import torch
 
-        if self.spec.prefix:
-            sentences = [self.spec.prefix + s for s in sentences]
-            target = {}
-        else:
-            self.tokenizer.src_lang = NLLB_CODES[language]
-            target = {"forced_bos_token_id": self.target_id}
+        self.tokenizer.src_lang = NLLB_CODES[language]
+        target = {"forced_bos_token_id": self.target_id}
         batch = self.tokenizer(sentences, return_tensors="pt", padding=True, truncation=True, max_length=256)
         batch = batch.to(self.device)
         with torch.inference_mode():

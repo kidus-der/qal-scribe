@@ -1,6 +1,6 @@
 """Translation quality gate: chrF of Amharic -> English on FLEURS test sentences (which come from FLORES).
 
-uv run python scripts/gpu_lock.py -- uv run python eval/translate_eval.py [--model nllb-600m|nllb-1.3b|madlad-3b]
+uv run python scripts/gpu_lock.py -- uv run python eval/translate_eval.py [--model nllb-600m|nllb-1.3b]
     [--limit 200] [--fp32] [--device cpu] [--speech eval/data/fleurs-am-test] [--asr-cache FILE]
 Downloads only data/am_et/test.tsv and data/en_us/test.tsv from google/fleurs, joins them on the shared sentence
 id, translates the REFERENCE Amharic text (text quality only, no speech errors) and scores against the English

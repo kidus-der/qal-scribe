@@ -104,7 +104,7 @@ most likely to change:
 |---|---|---|
 | `dictate_key`, `translate_key` | `"alt_r"`, `"ctrl_r"` | [pynput key names](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) such as `cmd_r`, `shift_r`, `f13`; `translate_key = ""` turns translation off |
 | `translation` | `true` | `false` turns translation off: no translate key, and the translation model is never downloaded or loaded (for small machines) |
-| `translation_model` | `"nllb-600m"` | `"nllb-1.3b"` or `"madlad-3b"` instead; see [docs/translation.md](docs/translation.md) for the measured differences |
+| `translation_model` | `"nllb-600m"` | `"nllb-1.3b"` instead; see [docs/translation.md](docs/translation.md) for the measured differences |
 | `mic` | system default | part of a microphone's name, or its number |
 | `numbers_to_digits` | `false` | write spoken numbers as digits: ሁለት ሺህ አስራ ሰባት → 2017 |
 | `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
@@ -173,8 +173,7 @@ qal-scribe about               licences and model attribution
 
 The code is MIT licensed. The models are downloaded at run time and keep their own licences: the Amharic speech
 model is CC-BY-4.0 and the NLLB translation models (`nllb-600m`, `nllb-1.3b`) are CC-BY-NC-4.0, which allows
-**non-commercial use only**; MADLAD-400 (`madlad-3b`) is Apache-2.0.
-`qal-scribe about` lists them all.
+**non-commercial use only**. `qal-scribe about` lists them all.
 
 ## Development
 
