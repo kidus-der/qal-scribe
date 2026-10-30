@@ -127,6 +127,11 @@ class QalApp(App):
         self.quitting = False
         self.clean_exit = True  # False when the controller's stop() left a model call running
 
+    @property
+    def base(self):
+        """The main window; settings and setup are screens pushed over it, and App queries hit the top one."""
+        return self.screen_stack[0]
+
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
         yield Stage(id="stage")
@@ -145,8 +150,8 @@ class QalApp(App):
         else:
             self.theme = "qal"
             self.notify(f"unknown theme {self.cfg.theme!r}; using qal", severity="warning")
-        self.screen.set_class(self.cfg.compact, "-compact")
-        self.query_one("#history-panel").border_title = "History"
+        self.base.set_class(self.cfg.compact, "-compact")
+        self.base.query_one("#history-panel").border_title = "History"
         self.set_interval(0.1, self.tick)
         mic = getattr(self.cfg, "mic", None)  # Config.mic arrives with the platform workstream
         self.run_worker(lambda: mic_name(mic), thread=True, name="mic", group="mic", exit_on_error=False)
@@ -172,7 +177,7 @@ class QalApp(App):
         match message.event:
             case ev.Level(rms):
                 if self.rec_mode:
-                    self.query_one(Meter).push(rms)
+                    self.base.query_one(Meter).push(rms)
                 return
             case ev.Loading(text):
                 self.loading_message = text
@@ -182,13 +187,13 @@ class QalApp(App):
                 self.loading, self.loading_message = False, ""
             case ev.RecordingStarted(mode):
                 self.rec_mode, self.rec_started, self.partial = mode, time.monotonic(), ""
-                self.query_one(Meter).reset()
+                self.base.query_one(Meter).reset()
             case ev.Partial(text):
                 self.partial = text
             case ev.RecordingStopped(mode):
                 self.rec_mode = None
                 self.pending.append(mode)
-                self.query_one(Meter).reset()
+                self.base.query_one(Meter).reset()
             case ev.Transcribed() as done:
                 await self.finish(done)
             case ev.Notice(text, level, clip) as notice:
@@ -197,7 +202,7 @@ class QalApp(App):
                 timeout = 10 if level == "error" else 5
                 if self.info is None:  # a setup problem: a 5 s toast is gone before anyone reads it
                     self.setup.append(notice)
-                elif self.screen.has_class("-compact"):  # a toast would cover the pill and lose its first lines
+                elif self.base.has_class("-compact"):  # a toast would cover the pill and lose its first lines
                     self.flash = notice, time.monotonic() + timeout
                     self.set_timer(timeout, self.refresh_view)
                 else:
@@ -208,7 +213,7 @@ class QalApp(App):
         if self.pending:
             self.pending.pop(0)
         self.last, self.loading_message = done, ""
-        history = self.query_one(ListView)
+        history = self.base.query_one(ListView)
         highlighted = history.index
         await history.insert(0, [HistoryRow(done)])
         if highlighted is not None:  # insert() does not shift the index: keep it on the row that is highlighted
@@ -285,7 +290,7 @@ class QalApp(App):
     def hero(self) -> Content:
         if self.quitting:
             return Content(f"{SPINNER[self.spin]}  Quitting…")
-        if self.failure and self.screen.has_class("-compact"):
+        if self.failure and self.base.has_class("-compact"):
             return Content.assemble(("Could not start: ", "bold $error"), self.failure)
         if self.failure:
             return Content.assemble(("Could not start\n", "bold $error"), self.failure, "\nPress q to quit.")
@@ -316,15 +321,15 @@ class QalApp(App):
             return
         state = self.state
         for s in STATES:
-            self.screen.set_class(s == state, f"-{s}")
-        self.screen.set_class(bool(self.setup), "-notes")
-        top = self.query_one(TopBar)
+            self.base.set_class(s == state, f"-{s}")
+        self.base.set_class(bool(self.setup), "-notes")
+        top = self.base.query_one(TopBar)
         top.set_pill(self.pill_label())
         top.set_status(self.status_line(), f" · mic {self.mic}" if self.info and self.mic else "")
         keys = "  ".join(f"{key} {mode}" for key, mode in self.hotkeys.items())
-        self.query_one("#keys", Static).update(keys)
-        stage = self.query_one(Stage)
-        compact = self.screen.has_class("-compact")
+        self.base.query_one("#keys", Static).update(keys)
+        stage = self.base.query_one(Stage)
+        compact = self.base.has_class("-compact")
         stage.border_title = self.stage_title(state)
         stage.border_subtitle = self.stage_subtitle()
         if self.flash and time.monotonic() >= self.flash[1]:
@@ -341,13 +346,13 @@ class QalApp(App):
             stage.show_transcript(self.last.text + ("  ✗ not pasted" if not_pasted else ""))
         else:
             stage.show_hero(self.hero(), big=not (compact or self.setup))
-        history = self.query_one(ListView)
+        history = self.base.query_one(ListView)
         history.display = bool(len(history))
-        self.query_one("#history-empty").display = not len(history)
+        self.base.query_one("#history-empty").display = not len(history)
         legend = HISTORY_LEGEND
-        if self.screen.has_class("-narrow"):  # which hides the stats column
+        if self.base.has_class("-narrow"):  # which hides the stats column
             legend = legend.removeprefix("audio · compute   ")
-        self.query_one("#history-panel").border_subtitle = legend if len(history) else ""
+        self.base.query_one("#history-panel").border_subtitle = legend if len(history) else ""
 
     def active_mode(self) -> ev.Mode:
         if self.rec_mode or self.pending:
@@ -419,7 +424,7 @@ class QalApp(App):
         self.notify(self.theme, title="theme", timeout=1.5)
 
     def action_compact(self) -> None:
-        self.screen.toggle_class("-compact")
+        self.base.toggle_class("-compact")
         self.refresh_view()
 
     def action_quit(self) -> None:
