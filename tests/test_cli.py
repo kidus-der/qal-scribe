@@ -133,6 +133,20 @@ def test_models_download_translation(monkeypatch, tmp_path, capsys):
     assert "fetched facebook/nllb-200-distilled-1.3B" in capsys.readouterr().out
 
 
+def test_models_download_translation_with_a_bad_model_name_is_friendly(monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "download", lambda spec, with_lm=False: tmp_path)
+    path = tmp_path / "config.toml"
+    path.write_text('translation_model = "bogus"\n')
+    msg = exit_message(["--config", str(path), "models", "download", "--translation"])
+    assert "translation_model 'bogus'" in msg and "nllb-600m, nllb-1.3b" in msg
+
+
+def test_transcribe_translate_errors_when_translation_is_off(tmp_path):
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"")
+    assert "translation is off" in exit_message(["--no-translate", "transcribe", str(wav), "--translate"])
+
+
 def test_models_download_unknown_language():
     assert "no model for language 'xx'" in exit_message(["models", "download", "xx"])
 
@@ -212,9 +226,9 @@ def test_the_chosen_translation_model_is_the_one_fetched(monkeypatch, tmp_path):
     monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
     monkeypatch.setattr("qal_scribe.plain.run", lambda cfg: None)
     path = tmp_path / "config.toml"
-    path.write_text('translation_model = "madlad-3b"\n')
+    path.write_text('translation_model = "nllb-1.3b"\n')
     cli.main(["--plain", "--config", str(path)])
-    assert downloads == ["madlad-3b"]
+    assert downloads == ["nllb-1.3b"]
 
 
 def test_a_failed_translation_download_still_starts_dictation(monkeypatch, capsys):
@@ -281,9 +295,9 @@ def test_help_says_how_to_start_and_subcommands_describe_themselves(capsys):
 def test_models_lists_aligned_columns_and_the_translation_model(capsys):
     cli.main(["models"])
     lines = capsys.readouterr().out.splitlines()
-    table = lines[: len(models.MODELS) + 2 + 2]
-    assert "facebook/nllb-200-distilled-600M" in table[-3] and "not downloaded" in table[-3]
-    assert "google/madlad400-3b-mt" in table[-1] and "Apache-2.0" in table[-1]
+    table = lines[: len(models.MODELS) + 2 + 1]
+    assert "facebook/nllb-200-distilled-600M" in table[-2] and "not downloaded" in table[-2]
+    assert "facebook/nllb-200-distilled-1.3B" in table[-1] and "CC-BY-NC-4.0" in table[-1]
     assert len({re.search(r"CC-BY|Apache", line).start() for line in table[1:]}) == 1  # one licence column
     assert lines[-1].startswith("download one with: qal-scribe models download LANG")
 

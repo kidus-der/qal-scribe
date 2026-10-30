@@ -28,7 +28,7 @@ Some apps read the clipboard late. Raise `restore_delay` in `config.toml` (for e
 
 **Translation leaves sentences out or runs them together.**
 qal-scribe cuts sentences where you pause for about half a second. Pause briefly between sentences. A bigger
-model (`nllb-1.3b`, `madlad-3b`) may translate better, at the cost of speed and memory.
+model (`nllb-1.3b`) may translate better, at the cost of speed and memory.
 
 **Why does it ask for Python 3.12?**
 The language-model decoder that makes the text more accurate has no builds for newer Pythons. On another
@@ -38,8 +38,8 @@ version qal-scribe still works, with slightly less accurate decoding. uv downloa
 No. PyTorch no longer builds for Intel Macs, and Windows is not supported. Linux works and is in beta.
 
 **Can I use it at work, or in a product?**
-The code is MIT licensed. The Amharic speech model is CC-BY-4.0. The NLLB translation models (the default) are
-for **non-commercial use only**; `madlad-3b` is Apache-2.0. `qal-scribe about` lists every licence.
+The code is MIT licensed. The Amharic speech model is CC-BY-4.0. The NLLB translation models are
+for **non-commercial use only**. `qal-scribe about` lists every licence.
 
 **Can it dictate other languages?**
 Tigrinya, Afaan Oromo, Somali, Sidaama and Wolaytta are experimental, rough drafts at best. See

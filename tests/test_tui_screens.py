@@ -194,10 +194,10 @@ def test_unticking_translation_writes_the_config_and_drops_its_row(setup_env):
 def test_choosing_a_model_is_saved_and_shows_its_licence(setup_env):
     async def scenario(app, fake, pilot):
         await pilot.pause()
-        app.screen.query_one("#tr-model").value = "madlad-3b"
+        app.screen.query_one("#tr-model").value = "nllb-1.3b"
         await pilot.pause()
-        assert app.cfg.translation_model == "madlad-3b" and 'translation_model = "madlad-3b"' in config_file().read_text()
-        assert "free to use commercially" in screen_text(app)
+        assert app.cfg.translation_model == "nllb-1.3b" and 'translation_model = "nllb-1.3b"' in config_file().read_text()
+        assert "non-commercial use only" in screen_text(app)
 
     drive(scenario, setup=True)
 
@@ -358,11 +358,10 @@ def test_the_microphone_picker_lists_the_real_inputs(monkeypatch):
 
 
 def test_input_devices_skips_outputs(monkeypatch):
-    import sounddevice
-
-    monkeypatch.setattr(sounddevice, "query_devices", lambda: [{"name": "Mic", "max_input_channels": 1},
-                                                              {"name": "Speakers", "max_input_channels": 0},
-                                                              {"name": "Mic", "max_input_channels": 2}])
+    devices = [{"name": "Mic", "max_input_channels": 1}, {"name": "Speakers", "max_input_channels": 0},
+               {"name": "Mic", "max_input_channels": 2}]
+    # a stand-in module: importing the real one fails where PortAudio has no server (CI)
+    monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(query_devices=lambda: devices))
     assert screens.input_devices() == ["Mic"]
 
 
@@ -463,7 +462,7 @@ def test_capture_rejects_character_keys_and_the_other_modes_key(monkeypatch):
 
 
 def test_capture_converts_pynput_keys_and_ignores_typing_keys():
-    pynput = pytest.importorskip("pynput.keyboard")
+    pynput = pytest.importorskip("pynput.keyboard", exc_type=ImportError)  # no display on CI
     seen = []
     capture = KeyCapture("Dictate", None, False)
     capture.post_message = seen.append
@@ -669,9 +668,9 @@ def test_help_lists_the_configured_keys_and_any_key_closes_it():
 
 def test_the_status_line_says_whether_translation_is_on():
     async def scenario(app, fake, pilot):
-        assert "→EN madlad-3b" in shown_status(app)
+        assert "→EN nllb-1.3b" in shown_status(app)
 
-    drive(scenario, cfg=Config(translation_model="madlad-3b"))
+    drive(scenario, cfg=Config(translation_model="nllb-1.3b"))
 
     async def off(app, fake, pilot):
         assert "translation off" in shown_status(app)
@@ -732,13 +731,15 @@ def test_continue_is_off_while_a_download_runs(setup_env, monkeypatch):
     drive(scenario, setup=True)
 
 
-def test_setup_fits_80x24_with_the_permissions_title_in_view(setup_env):
+@pytest.mark.parametrize(("platform", "title"), [("darwin", "Permissions"), ("linux", "Your system")])
+def test_setup_fits_80x24_with_the_permissions_title_in_view(setup_env, monkeypatch, platform, title):
+    monkeypatch.setattr(sys, "platform", platform)
     setup_env.checks = [NO_PASTE]
 
     async def scenario(app, fake, pilot):
         await pilot.pause()
         text = screen_text(app)
-        assert "Permissions" in text and "Download" in text and "Continue" in text
+        assert title in text and "Download" in text and "Continue" in text
 
     drive(scenario, setup=True, size=(80, 24))
 

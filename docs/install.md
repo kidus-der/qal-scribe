@@ -90,6 +90,6 @@ uv tool uninstall qal-scribe
 That leaves your settings and the downloaded models. To remove them too, delete:
 
 - the settings: `~/.config/qal-scribe` (the folder `qal-scribe config` shows)
-- the models: the `models--snapwre--hohe-asr-amharic` and `models--facebook--nllb-*` (or `models--google--madlad400-*`)
+- the models: the `models--snapwre--hohe-asr-amharic` and `models--facebook--nllb-*`
   folders in `~/.cache/huggingface/hub` (or under `$HF_HOME`)
 - a faster-loading copy of the speech model: `~/Library/Caches/qal-scribe` on macOS, `~/.cache/qal-scribe` on Linux

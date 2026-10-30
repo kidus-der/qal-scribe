@@ -15,8 +15,8 @@
 # Translation on or off. false: no translate key, and the translation model is never downloaded or loaded
 # (saves 2.5 GB of disk and some memory on small machines). `qal-scribe --no-translate` does the same for one run.
 # translation = true
-# Which model translates: "nllb-600m" (2.5 GB download, fast, the default), "nllb-1.3b" (5.5 GB) or
-# "madlad-3b" (11.8 GB). See docs/translation.md for how they compare; the NLLB ones are non-commercial.
+# Which model translates: "nllb-600m" (2.5 GB download, fast, the default) or "nllb-1.3b" (5.5 GB).
+# See docs/translation.md for how they compare; both are non-commercial.
 # translation_model = "nllb-600m"
 
 # Where the model runs: "mps" (Apple GPU), "cuda" or "cpu". Leave this line out to use the fastest one
@@ -52,6 +52,10 @@
 
 # Show a live draft of the text while you are still speaking.
 # preview = true
+
+# Show a small floating "Listening" / "Transcribing" pill near the bottom of the screen while you hold the key,
+# so you can see it works with the terminal hidden. macOS only; ignored on Linux.
+# indicator = true
 
 # Terminal UI. Themes: qal, qal-light, or a built-in Textual theme such as nord, gruvbox, dracula,
 # tokyo-night, catppuccin-mocha, solarized-light or textual-dark (press t in the window to try them all).

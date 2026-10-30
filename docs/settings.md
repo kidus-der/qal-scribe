@@ -43,7 +43,7 @@ the key you want.
 | Setting | Default | What it does | In `s` |
 |---|---|---|---|
 | `translation` | `true` | `false`: no translate key, and the translation model is never downloaded or loaded (saves 2.5 GB of disk and memory). `qal-scribe --no-translate` does the same for one run | at restart |
-| `translation_model` | `"nllb-600m"` | `"nllb-600m"` (2.5 GB), `"nllb-1.3b"` (5.5 GB) or `"madlad-3b"` (11.8 GB). Bigger is slower; the NLLB models are for non-commercial use only | at restart |
+| `translation_model` | `"nllb-600m"` | `"nllb-600m"` (2.5 GB), `"nllb-1.3b"` (5.5 GB). Bigger is slower; both are for non-commercial use only | at restart |
 
 **Text clean-up** (made for Amharic)
 
@@ -60,6 +60,7 @@ the key you want.
 |---|---|---|---|
 | `restore_delay` | `0.5` | seconds before your clipboard is put back after pasting. Raise it if an app pastes your old clipboard instead | no |
 | `sounds` | `true` | a short sound when recording starts and stops | live |
+| `indicator` | `true` | macOS only: a small floating pill at the bottom of the screen, "Listening" while you hold the key and "Transcribing…" after, even when the terminal is hidden. It never takes focus. Ignored on Linux | no |
 | `theme` | `"qal"` | colours: `qal`, `qal-light`, or a built-in Textual theme such as `nord`, `gruvbox`, `dracula`, `tokyo-night`. `t` in the window cycles them | live |
 | `compact` | `false` | a 3 to 5 line strip for a small, always-visible window. `m` toggles it for now | live |
 

@@ -7,6 +7,7 @@ with os._exit, since Python would wait at exit for that call's threads (a model 
 """
 import contextlib
 import queue
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from qal_scribe.audio import SAMPLE_RATE, Recorder, play_cue
 from qal_scribe.config import load_words
 from qal_scribe.engine import Engine
 from qal_scribe.hotkey import PushToTalk, key_label
+from qal_scribe.indicator import Indicator
 from qal_scribe.translate import NLLB_CODES
 
 LEVEL_INTERVAL = 1 / 25  # throttle mic-level events to ~25/s
@@ -35,7 +37,7 @@ class Controller:
         self.engine = Engine(self.spec, device=cfg.device, use_lm=cfg.lm)
         self.words = load_words(cfg)
         self.translator = None
-        self.recorder = self.hotkeys = None
+        self.recorder = self.hotkeys = self._indicator = None
         self._mode: ev.Mode = "dictate"  # mode of the recording in progress
         self._clips: queue.Queue = queue.Queue()
         self._last_level = 0.0
@@ -68,7 +70,19 @@ class Controller:
         if self.hotkeys.reason:
             self.emit(ev.Notice(self.hotkeys.reason, "warning"))
         threading.Thread(target=self._worker, daemon=True).start()
+        if self.cfg.indicator and sys.platform == "darwin":
+            self._start_indicator()
         self.emit(self._ready())
+
+    def _start_indicator(self) -> None:
+        indicator = self._indicator = Indicator(lambda m: self.emit(ev.Notice(m, "warning")))
+        emit = self.emit
+
+        def tee(event: ev.Event) -> None:
+            indicator(event)
+            emit(event)
+
+        self.emit = tee
 
     def _ready(self) -> ev.Ready:
         keys = self.keys() if self.hotkeys and self.hotkeys.listening else {}  # Wayland: only `toggle` works
@@ -84,6 +98,8 @@ class Controller:
         if self.hotkeys:
             self.hotkeys.stop()
         ipc.stop()
+        if self._indicator:
+            self._indicator.close()
         if self.recorder and self.recorder.active:
             self.recorder.stop()
         self._clips.put(None)  # wakes the worker so it exits

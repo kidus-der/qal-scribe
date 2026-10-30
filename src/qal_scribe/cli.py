@@ -39,7 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     m = command(sub, "models", "list available languages and models")
     d = command(m.add_subparsers(dest="models_command"), "download", "fetch model weights now (then it works offline)")
     d.add_argument("language", nargs="?", help="language code (default: the one in your config)")
-    d.add_argument("--translation", action="store_true", help="also fetch the Amharic -> English model (2.5 GB for the default, see `translation_model`)")
+    d.add_argument("--translation", action="store_true", help="also fetch the Amharic -> English model\n"
+                   "(2.5 GB for the default, see `translation_model`)")
     c = command(sub, "config", "show the config file path")
     c.add_argument("--init", action="store_true", help="write a fully commented default config (never overwrites)")
     t = command(sub, "transcribe", "transcribe an audio file and print the text")
@@ -161,9 +162,17 @@ def cmd_models(args: argparse.Namespace) -> None:
         if args.translation:
             from qal_scribe import translate
 
-            t = translate.TRANSLATION_MODELS[cfg.translation_model]
+            t = translation_spec(cfg)
             print(f"Fetching translation model {t.repo} ({t.license})...", flush=True)
             print(f"-> {translate.download(cfg.translation_model)}")
+
+
+def translation_spec(cfg: Config):
+    from qal_scribe.translate import TRANSLATION_MODELS
+
+    if cfg.translation_model not in TRANSLATION_MODELS:
+        fail(f"bad config: translation_model {cfg.translation_model!r}: use one of {', '.join(TRANSLATION_MODELS)}")
+    return TRANSLATION_MODELS[cfg.translation_model]
 
 
 def cmd_about() -> None:
@@ -186,6 +195,8 @@ def resample(audio, rate: int, to: int):
 def cmd_transcribe(cfg: Config, file: str, translate: bool) -> None:
     if not Path(file).is_file():
         fail(f"no such file: {file}")
+    if translate and not cfg.translation:
+        fail("translation is off (translation = false in the config, or --no-translate); remove --translate")
     import soundfile as sf
 
     from qal_scribe import postprocess
@@ -239,8 +250,10 @@ def fetch_missing_models(cfg: Config, translation: bool = False, translation_req
               "(Ctrl+C cancels)...", file=sys.stderr, flush=True)
         with friendly_download_errors(), interruptible():
             models.download(spec, with_lm=cfg.lm)
-    t = translate.TRANSLATION_MODELS[cfg.translation_model]
-    if translation and not is_cached(t.repo, t.revision, t.weights):
+    if not translation:
+        return
+    t = translation_spec(cfg)
+    if not is_cached(t.repo, t.revision, t.weights):
         print(f"First run: fetching the translation model {t.repo} ({t.license}), about {t.size_gb:g} GB "
               "(Ctrl+C cancels)...", file=sys.stderr, flush=True)
         with friendly_download_errors(required=translation_required), interruptible():
@@ -308,7 +321,9 @@ def main(argv: list[str] | None = None) -> None:
 
                 sys.exit(send_toggle("translate" if args.translate else "dictate"))
             case "transcribe":
-                cmd_transcribe(load_config(path, bool(args.config)), args.file, args.translate)
+                cfg = load_config(path, bool(args.config))
+                cfg.translation = cfg.translation and not args.no_translate
+                cmd_transcribe(cfg, args.file, args.translate)
             case _:
                 cfg = load_config(path, bool(args.config))
                 if args.no_translate:

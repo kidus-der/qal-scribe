@@ -27,6 +27,7 @@ def test_words_file_expands_user(tmp_path):
     ("restore_delay = true", "restore_delay must be a number"),
     ('lm = "no"', "lm must be true or false"),
     ("sounds = 1", "sounds must be true or false"),
+    ('indicator = "yes"', "indicator must be true or false"),
     ("words_file = 5", "words_file must be text in quotes"),
     ("device = 0", "device must be text in quotes"),
     ('translate_key = ["ctrl_r"]', "translate_key must be text in quotes"),

@@ -92,6 +92,7 @@ Press `s` in the window to change the common settings; each one saves at once. E
 | `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
 | `punctuation` | `false` | add ። ? and ፣ by rule (experimental) |
 | `preview` | `true` | a live draft while you speak |
+| `indicator` | `true` | macOS: a small floating pill, "Listening" while you hold the key and "Transcribing…" after, even when the terminal is hidden; ignored on Linux |
 
 Every setting, with its default, is in [docs/settings.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/settings.md),
 including your own word corrections (`words.txt`) and how the experimental punctuation behaves.
@@ -110,7 +111,6 @@ Pick the model on the setup screen, in the settings, or with `translation_model`
 |---|---|---|
 | `nllb-600m` (default) | 2.5 GB | CC-BY-NC-4.0, non-commercial use only |
 | `nllb-1.3b` | 5.5 GB | CC-BY-NC-4.0, non-commercial use only |
-| `madlad-3b` | 11.8 GB | Apache-2.0 |
 
 Bigger models are slower and need more memory. On a machine with little memory, turn translation off: the
 translation model is then never loaded.
@@ -216,7 +216,7 @@ qal-scribe about               licences and model attribution
 
 The code is MIT licensed. The models are downloaded at run time and keep their own licences: the Amharic
 speech model, [snapwre/hohe-asr-amharic](https://huggingface.co/snapwre/hohe-asr-amharic), is CC-BY-4.0; the
-NLLB translation models are CC-BY-NC-4.0, which allows **non-commercial use only**; MADLAD-400 is Apache-2.0.
+NLLB translation models are CC-BY-NC-4.0, which allows **non-commercial use only**.
 `qal-scribe about` lists them all. The ቃል in the logo is drawn from Noto Sans Ethiopic (SIL Open Font
 License 1.1).
 
