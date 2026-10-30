@@ -217,6 +217,27 @@ def microphone_permission() -> int:
     return objc.lookUpClass("AVCaptureDevice").authorizationStatusForMediaType_("soun")  # AVMediaTypeAudio
 
 
+def request_permission(pane: str) -> None:
+    """Ask macOS for the permission (which also lists the terminal under it). Never raises: if the call is not
+    there the caller opens the Settings pane instead."""
+    try:
+        if pane == "Microphone":
+            import objc
+
+            microphone_permission()  # loads AVFoundation
+            objc.lookUpClass("AVCaptureDevice").requestAccessForMediaType_completionHandler_("soun", lambda ok: None)
+        elif pane == "Accessibility":
+            from ApplicationServices import AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt
+
+            AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})
+        else:
+            import Quartz
+
+            Quartz.CGRequestListenEventAccess()
+    except Exception:  # noqa: BLE001, S110 - a missing symbol or framework just means "open the pane instead"
+        pass
+
+
 def check_microphone_permission() -> Check | None:
     if sys.platform != "darwin":
         return None
