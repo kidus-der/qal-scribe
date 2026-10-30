@@ -78,7 +78,7 @@ class FakeTranslator:
 
 
 def make(monkeypatch, tmp_path, pasted=True, **engine_kw):
-    cfg = config.Config(words_file=tmp_path / "words.txt", sounds=False)
+    cfg = config.Config(words_file=tmp_path / "words.txt", sounds=False, translate_key="ctrl_r")
     out = []
     c = controller.Controller(cfg, out.append)
     c.engine, c.recorder = FakeEngine(models.get("amh"), **engine_kw), FakeRecorder()

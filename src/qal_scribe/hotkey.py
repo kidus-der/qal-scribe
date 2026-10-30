@@ -1,6 +1,6 @@
 """Global push-to-talk keys (macOS/Windows/X11 via pynput). Linux Wayland uses `qal-scribe toggle` instead.
 
-Contract: PushToTalk({"alt_r": "dictate", "ctrl_r": "translate"}, on_start(mode), on_stop(mode)).start()
+Contract: PushToTalk({"alt_r": "dictate", "cmd_r": "translate"}, on_start(mode), on_stop(mode)).start()
 Only one key records at a time; on_start/on_stop run on pynput's thread and must return quickly.
 `reason` is a user-facing sentence when global keys cannot work here (Wayland, no X display, macOS Input
 Monitoring off); the UI shows it. `listening` is False when no key will ever be heard (Wayland, no pynput, a

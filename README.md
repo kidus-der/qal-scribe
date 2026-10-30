@@ -55,7 +55,7 @@ System Settings > Privacy & Security, then quit and reopen the terminal:
 | Key | What it does |
 |---|---|
 | Hold **Right Option**, speak, release | Amharic text is pasted at your cursor |
-| Hold **Right Control**, speak, release | The English translation is pasted |
+| Hold **Right Command** (Linux: **Right Control**), speak, release | The English translation is pasted |
 
 Translation goes sentence by sentence, and the speech model writes no punctuation, so qal-scribe takes a pause of
 half a second as the end of a sentence: pause briefly between sentences when you translate.
@@ -101,7 +101,7 @@ most likely to change:
 
 | Setting | Default | |
 |---|---|---|
-| `dictate_key`, `translate_key` | `"alt_r"`, `"ctrl_r"` | [pynput key names](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) such as `cmd_r`, `shift_r`, `f13`; `translate_key = ""` turns translation off |
+| `dictate_key`, `translate_key` | `"alt_r"`, `"cmd_r"` (Linux: `"ctrl_r"`; Apple keyboards have no Right Control) | [pynput key names](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) such as `ctrl_r`, `shift_r`, `f13`; `translate_key = ""` turns translation off |
 | `mic` | system default | part of a microphone's name, or its number |
 | `numbers_to_digits` | `false` | write spoken numbers as digits: ሁለት ሺህ አስራ ሰባት → 2017 |
 | `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
