@@ -8,14 +8,14 @@ from qal_scribe.config import Config
 from qal_scribe.controller import Controller
 
 
-def format_event(e: ev.Event) -> str | None:
+def format_event(e: ev.Event, translation: bool = True) -> str | None:
     match e:
         case ev.Loading(message):
             return f"… {message}"
         case ev.Ready(device, model, _, lm, hotkeys):
             keys = ", ".join(f"hold {k} to {m}" for k, m in hotkeys.items()) or (
-                "run `qal-scribe toggle` (bound to a key) to start and stop, `qal-scribe toggle --translate` for "
-                "English")
+                "run `qal-scribe toggle` (bound to a key) to start and stop"
+                + (", `qal-scribe toggle --translate` for English" if translation else ""))
             return f"ready on {device} ({model}{', LM on' if lm else ''}): {keys}. Ctrl+C to quit"
         case ev.RecordingStarted(mode):  # with sounds off or `toggle`, the only sign the press was heard
             return f"● recording ({mode})"
@@ -31,7 +31,7 @@ def format_event(e: ev.Event) -> str | None:
 
 def run(cfg: Config) -> None:
     def emit(e: ev.Event) -> None:
-        line = format_event(e)
+        line = format_event(e, cfg.translation)
         if line:
             print(line, flush=True)
 
