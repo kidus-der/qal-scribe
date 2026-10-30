@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -90,3 +91,17 @@ def test_the_helper_exits_when_stdin_closes():
     p.stdin.write("bogus\n")  # unknown lines are ignored, and nothing is shown without a state
     p.stdin.close()
     assert p.wait(10) == 0, p.stderr.read()
+
+
+def test_a_dying_helper_does_not_deadlock_when_on_error_emits_back_into_the_indicator():
+    box = {}
+
+    def emit(event):  # the controller's wiring: its Notice goes through the tee, back into the indicator
+        box["ind"](event)
+
+    ind = box["ind"] = indicator.Indicator(lambda m: emit(ev.Notice(m, "warning")),
+                                           popen=lambda *a, **kw: FakeProc(broken=True))
+    t = threading.Thread(target=ind, args=(ev.RecordingStarted("dictate"),), daemon=True)
+    t.start()
+    t.join(2)
+    assert not t.is_alive()

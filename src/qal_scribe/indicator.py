@@ -29,28 +29,36 @@ class Indicator:
 
     def __call__(self, event: ev.Event) -> None:
         with self._lock:
-            match event:
-                case ev.RecordingStarted():
-                    self.recording = True
-                case ev.RecordingStopped():
-                    self.recording, self.pending = False, self.pending + 1
-                case ev.Transcribed() | ev.Notice(clip=True):  # every recorded clip ends in one of these
-                    self.pending = max(0, self.pending - 1)
-                case _:
-                    return
-            state = "listening" if self.recording else "transcribing" if self.pending else "hidden"
-            if state != self.state:
-                self.state = state
-                self._send(state)
+            failed = self._update(event)
+        if failed:  # outside the lock: on_error may emit an event that comes straight back into this call
+            self._fail(failed)
 
-    def _send(self, line: str) -> None:
+    def _update(self, event: ev.Event) -> str | None:
+        match event:
+            case ev.RecordingStarted():
+                self.recording = True
+            case ev.RecordingStopped():
+                self.recording, self.pending = False, self.pending + 1
+            case ev.Transcribed() | ev.Notice(clip=True):  # every recorded clip ends in one of these
+                self.pending = max(0, self.pending - 1)
+            case _:
+                return None
+        state = "listening" if self.recording else "transcribing" if self.pending else "hidden"
+        if state != self.state:
+            self.state = state
+            return self._send(state)
+        return None
+
+    def _send(self, line: str) -> str | None:
         if self._proc is None:
-            return
+            return None
         try:
             self._proc.stdin.write(line + "\n")
             self._proc.stdin.flush()
         except (OSError, ValueError):  # BrokenPipeError: the helper died; ValueError: closed
-            self._fail("the helper exited")
+            self._proc = None
+            return "the helper exited"
+        return None
 
     def _fail(self, why: str) -> None:
         self._proc = None
