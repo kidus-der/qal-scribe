@@ -1,6 +1,6 @@
 [project]
 name = "qal-scribe"
-version = "1.0.2"
+version = "1.0.3"
 description = "On-device push-to-talk dictation for Amharic"
 readme = "README.md"
 license = "MIT"

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+### Fixed
+- `qal-scribe update` now also upgrades an install that was pinned to a version (`qal-scribe==1.0.1`); before, it
+  said it was updating and changed nothing.
+
 ## 1.0.2
 
 ### New

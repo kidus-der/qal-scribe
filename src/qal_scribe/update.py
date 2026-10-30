@@ -62,6 +62,8 @@ def upgrade_command() -> list[str]:
         cpu_torch = "+cpu" in metadata.version("torch")
     except metadata.PackageNotFoundError:
         cpu_torch = False
-    if cpu_torch:  # uv does not remember --torch-backend, and a plain upgrade could pull the multi-GB CUDA build
-        return ["uv", "tool", "install", "--python", "3.12", "qal-scribe", "--torch-backend", "cpu", "--upgrade"]
-    return ["uv", "tool", "upgrade", "qal-scribe"]
+    # @latest, not `uv tool upgrade`: that does nothing for an install pinned to a version (qal-scribe==1.0.1)
+    command = ["uv", "tool", "install", "--python", "3.12", "qal-scribe@latest"]
+    if cpu_torch:  # uv does not remember --torch-backend, and an upgrade could pull the multi-GB CUDA build
+        command += ["--torch-backend", "cpu"]
+    return command

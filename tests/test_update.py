@@ -44,9 +44,9 @@ def test_offline_or_a_broken_cache_is_silent():
 
 def test_upgrade_command_keeps_a_cpu_torch_build(monkeypatch):
     monkeypatch.setattr(update.metadata, "version", lambda name: "2.15.0")
-    assert update.upgrade_command() == ["uv", "tool", "upgrade", "qal-scribe"]
+    assert update.upgrade_command() == ["uv", "tool", "install", "--python", "3.12", "qal-scribe@latest"]
     monkeypatch.setattr(update.metadata, "version", lambda name: "2.15.0+cpu")
-    assert update.upgrade_command()[-3:] == ["--torch-backend", "cpu", "--upgrade"]
+    assert update.upgrade_command()[-3:] == ["qal-scribe@latest", "--torch-backend", "cpu"]
 
 
 def test_update_command_runs_uv_for_a_uv_tool_install(monkeypatch, capsys):
