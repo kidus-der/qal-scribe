@@ -121,6 +121,7 @@ class QalApp(App):
         Binding("d", "setup", "Setup"),
         Binding("t", "cycle_theme", "Theme", show=False),  # also in Settings; ? lists them
         Binding("m", "compact", "Compact", show=False),
+        Binding("v", "sounds", "Mute"),
         Binding("question_mark", "help", "Help", key_display="?"),
         Binding("escape", "latest", "Latest", show=False),
         Binding("q", "quit", "Quit"),
@@ -567,6 +568,11 @@ class QalApp(App):
     def action_compact(self) -> None:
         self.base.toggle_class("-compact")
         self.refresh_view()
+
+    def action_sounds(self) -> None:
+        problem = screens.save_changes(self, {"sounds": not self.cfg.sounds})
+        self.notify(problem or ("sounds on" if self.cfg.sounds else "sounds muted"),
+                    severity="error" if problem else "information")
 
     def action_quit(self) -> None:
         if self.quitting:

@@ -42,7 +42,7 @@
 # your old clipboard instead of the dictated text.
 # restore_delay = 0.5
 
-# Play a short sound when recording starts and stops.
+# Play short sounds when recording starts, stops or fails (press v in the app to mute).
 # sounds = true
 
 # Microphone: part of its name (e.g. "MacBook Pro Microphone") or its number. Leave this line out to use the

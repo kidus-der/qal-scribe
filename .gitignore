@@ -7,3 +7,7 @@ dist/
 eval/data/
 eval/results/
 *.wav
+
+# local notes for Claude Code sessions (not published)
+CLAUDE.md
+.claude/

@@ -16,6 +16,8 @@
 - **A clearer window.** Problems come with a one-line fix and a link to the right System Settings pane; the
   history shows the full text of the selected row; small terminals get a compact layout; the theme you pick is
   remembered.
+- **Mute with one key.** Press `v` to turn the start, stop and error sounds off or on; it is saved to
+  `config.toml` (`sounds = false`).
 - **New README and a `docs/` folder** with install, settings, permissions, translation, languages and a FAQ.
 
 ### Fixed

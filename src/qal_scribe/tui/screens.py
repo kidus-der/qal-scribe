@@ -555,7 +555,7 @@ SETTINGS = [
     Setting("numbers_to_digits", "Numbers as digits", "Write spoken numbers as 1 2 3", "switch", True),
     Setting("punctuation", "Punctuation (experimental)", "Add punctuation with simple rules", "switch", True),
     Setting("merge_homophones", "Merge homophones", "Spell sound-alike letters one way", "switch", True),
-    Setting("sounds", "Sounds", "A short sound when recording starts and stops", "switch", True),
+    Setting("sounds", "Sounds", "Start, stop and error sounds (v mutes)", "switch", True),
     Setting("preview", "Live preview", "A draft of the text while you are still speaking", "switch", True),
     Setting("mic", "Microphone", "Which input to record from", "mic", False),
     Setting("dictate_key", "Dictate key", "Hold to record, release to paste", "key", False),

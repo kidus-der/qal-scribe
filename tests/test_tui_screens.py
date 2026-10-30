@@ -769,3 +769,15 @@ def test_status_line_says_translation_off_without_a_translate_key():
         assert "translation off" in screen_text(app) and "→EN" not in screen_text(app)
 
     drive(scenario, cfg=Config(translate_key=""), size=(100, 24))
+
+
+def test_v_mutes_and_unmutes_the_sounds_and_saves_it():
+    async def scenario(app, fake, pilot):
+        await pilot.press("v")
+        await pilot.pause()
+        assert app.cfg.sounds is False and "sounds = false" in config_file().read_text()
+        await pilot.press("v")
+        await pilot.pause()
+        assert app.cfg.sounds is True and "sounds = true" in config_file().read_text()
+
+    drive(scenario)

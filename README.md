@@ -72,6 +72,7 @@ Something not working? `qal-scribe doctor` checks everything and prints the fix 
 | `d` | setup: permissions and downloads |
 | `l` | switch language (when you have downloaded more than one) |
 | `t` / `m` | next colour theme / compact layout for a small window |
+| `v` | mute or unmute the sounds (saved to your config) |
 | `?` | every key, as you configured them |
 | `q` | quit |
 
