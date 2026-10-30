@@ -109,3 +109,25 @@ def test_working_setup_has_no_reason_and_one_key_at_a_time(monkeypatch):
     release("CTRL_R")
     release("ALT_R")
     assert events == [("start", "dictate"), ("stop", "dictate")]
+
+
+def test_paused_keys_do_nothing_until_resumed(monkeypatch):
+    session(monkeypatch, DISPLAY=":0")
+    fake_pynput(monkeypatch)
+    started = []
+    keys = hotkey.PushToTalk({"alt_r": "dictate"}, started.append, lambda m: None)
+    keys.paused = True
+    keys._press("ALT_R")
+    assert started == []
+    keys.paused = False
+    keys._press("ALT_R")
+    assert started == ["dictate"]
+
+
+@pytest.mark.parametrize(("platform", "alt", "cmd"), [("darwin", "Right Option", "Right Command"),
+                                                     ("linux", "Right Alt", "Right Super")])
+def test_key_labels_follow_the_platform(monkeypatch, platform, alt, cmd):
+    monkeypatch.setattr(sys, "platform", platform)
+    assert (hotkey.key_label("alt_r"), hotkey.key_label("cmd_r")) == (alt, cmd)
+    assert hotkey.key_label("ctrl_r") == "Right Control" and hotkey.key_label("f13") == "F13"
+    assert hotkey.key_label("caps_lock") == "caps_lock" and hotkey.key_label("find") == "find"

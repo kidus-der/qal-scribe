@@ -1,3 +1,4 @@
+import sys
 import threading
 import time
 
@@ -120,6 +121,7 @@ def test_words_file_parsing(tmp_path):
 
 
 def test_ready_reports_whether_the_lm_is_active(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "darwin")  # key labels follow the platform
     c, _ = make(monkeypatch, tmp_path)
     c.hotkeys = FakeHotkeys()
     assert c._ready().lm is False

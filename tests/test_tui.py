@@ -2,11 +2,13 @@
 import asyncio
 import dataclasses
 import io
+import os
 import re
 import subprocess
 import sys
 import threading
 import types
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -52,9 +54,12 @@ class FakeController:
 COPIED: list[str] = []  # what the copy key put on the (fake) system clipboard
 
 
-def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipboard=True, notifications=False):
+def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipboard=True, notifications=False,
+          setup=False):
     """Run `scenario(app, fake, pilot)` against the app (fake = the FakeController it started).
-    clipboard=False: the system clipboard is unreachable. notifications=True draws toasts (screenshots)."""
+    clipboard=False: the system clipboard is unreachable. notifications=True draws toasts (screenshots).
+    setup=True: the setup screen opens at start; False: it never does, whatever this machine has cached;
+    None: only when something is missing, as in real use."""
     made: list[FakeController] = []
 
     def make(c, emit):
@@ -62,9 +67,10 @@ def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipb
         return made[0]
 
     async def go():
-        app = QalApp(cfg or Config(), controller_factory=factory or make)
+        app = QalApp(cfg or Config(), controller_factory=factory or make, setup=setup,
+                     config_path=Path(os.environ["XDG_CONFIG_HOME"]) / "qal-scribe" / "config.toml")
         async with app.run_test(size=size, notifications=notifications) as pilot:
-            if not hold:
+            if not hold and setup is False:
                 await settle(pilot)
             await scenario(app, made[0] if made else None, pilot)
 
@@ -186,7 +192,7 @@ def test_model_progress_bars_in_the_boot_thread_do_not_break_the_start(tmp_path)
         "        self.emit(ev.Ready('cpu', 'm', 'amh', False, {}))\n"
         "    def stop(self): pass\n"
         "async def go():\n"
-        "    app = app_mod.QalApp(Config(), controller_factory=Fake)\n"
+        "    app = app_mod.QalApp(Config(), controller_factory=Fake, setup=False)\n"
         "    async with app.run_test() as pilot:\n"
         "        await asyncio.to_thread(app.boot_thread.join, 20)\n"
         "        await pilot.pause()\n"
@@ -205,7 +211,8 @@ def test_a_failed_start_shows_the_error_instead_of_loading_forever():
         await settle(pilot)
         assert pill(app) == "ERROR" and app.screen.has_class("-failed")
         assert "OSError: no network" in screen_text(app)
-        assert any("no network" in message for message, severity in toasts(app))
+        assert toasts(app) == []  # the stage already says it, with the way out
+        assert "run `qal-scribe doctor`" in screen_text(app)
 
     drive(scenario, factory=broken)
 
@@ -220,7 +227,7 @@ def test_a_long_start_error_fits_with_the_way_out():
     async def scenario(app, fake, pilot):
         await settle(pilot)
         assert app.query_one("#stage").border_title == "Error"
-        assert "offline mode" in screen_text(app) and "Press q to quit." in screen_text(app)
+        assert "offline mode" in screen_text(app) and "s Settings · d Setup · q Quit" in screen_text(app)
 
     drive(scenario, factory=broken, size=(80, 24))
 
@@ -235,7 +242,7 @@ def test_before_ready_the_header_names_the_language():
     async def scenario(app, fake, pilot):
         assert fake.started.wait(5)
         await pilot.pause()
-        assert shown(app, "#status") == "Amharic" and app.query_one("#stage").border_title == "Starting"
+        assert shown(app, "#status") == "Amharic" and app.query_one("#stage").border_title == "Loading Amharic"
         fake.hold.set()
         await settle(pilot)
 
@@ -248,7 +255,7 @@ def test_status_drops_the_mic_rather_than_cutting_it_off():
         assert "mic" not in screen_text(app).splitlines()[0] and "LM on" in shown(app, "#status")
         await pilot.resize_terminal(120, 36)
         await pilot.pause()
-        assert "LM on · mic Test Microphone" in screen_text(app).splitlines()[0]
+        assert "LM on · →EN nllb-600m · mic Test Microphone" in screen_text(app).splitlines()[0]
 
     drive(scenario, size=(80, 20))
 
@@ -403,10 +410,10 @@ def test_nothing_recognised_and_not_pasted_are_marked():
     async def scenario(app, fake, pilot):
         await send(pilot, ev.RecordingStopped("dictate", 1.0), done("", pasted=False))
         text = screen_text(app)
-        assert "(nothing recognised)" in text and "✗" in text and "not pasted" in text
+        assert "(nothing recognised)" in text and "nothing to paste" in text
+        assert [m.render() for m in app.query(".paste")] == ["·"]  # muted, not the warning-coloured ✗
         assert app.query_one("#stage").has_class("-empty")
-        await pilot.press("c")
-        assert toasts(app)[-1] == ("nothing to copy yet", "warning")
+        assert app.check_action("copy", ()) is None  # the footer dims it; the key does nothing
 
     drive(scenario)
 
@@ -447,7 +454,8 @@ def test_without_global_hotkeys_the_screen_says_toggle_and_keeps_the_warnings():
         text = screen_text(app)
         assert "Right Option" not in text and "Hold" not in text and toasts(app) == []
         assert "Run qal-scribe toggle (bound to a key)" in text and "qal-scribe toggle --translate" in text
-        assert "Wayland does not allow global hotkeys" in text and "text insertion needs wtype" in text
+        assert "Wayland does not allow" not in text  # the hero already says to bind `qal-scribe toggle`
+        assert "⚠ text insertion needs wtype" in text
         await send(pilot, ev.RecordingStarted("dictate"))
         assert "run `qal-scribe toggle` again to finish" in screen_text(app)
         assert "Right Option" not in screen_text(app)
@@ -704,7 +712,7 @@ def test_q_still_exits_when_stop_fails_or_is_missing():
 def test_footer_lists_every_binding():
     async def scenario(app, fake, pilot):
         footer = screen_text(app).splitlines()[-1]
-        for hint in ("c Copy last", "l Language", "t Theme", "m Compact", "q Quit"):
+        for hint in ("c Copy last", "l Language", "s Settings", "d Setup", "? Help", "q Quit"):
             assert hint in footer
         assert "Right Option dictate" in footer
 
@@ -782,7 +790,9 @@ def test_run_hard_exits_only_while_the_controller_is_still_starting(monkeypatch)
     monkeypatch.setattr(app_mod.os, "_exit", exits.append)
 
     class Stub:
-        def __init__(self, cfg):
+        download_thread, restart = None, False
+
+        def __init__(self, cfg, **kwargs):
             self.boot_thread = types.SimpleNamespace(is_alive=lambda: still_loading)
             self.clean_exit = clean
 

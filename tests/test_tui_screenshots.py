@@ -87,3 +87,30 @@ def test_loading_screenshot(tmp_path):
 
     drive(scenario, hold=True)
     assert (folder / "loading-120x36.svg").stat().st_size > 5_000
+
+
+@pytest.mark.parametrize("size", ["120x36", "80x24"])
+@pytest.mark.parametrize("scene", ["setup", "settings", "help"])
+def test_new_screens_screenshot(scene, size, tmp_path, monkeypatch):
+    from qal_scribe import doctor, models
+    from qal_scribe.doctor import Check
+    from qal_scribe.tui import screens
+
+    folder = Path(os.environ.get("QAL_TUI_SHOTS", tmp_path))
+    folder.mkdir(parents=True, exist_ok=True)
+    checks = [Check("Microphone permission", "ok", "granted"),
+              Check("Accessibility", "fail", "Terminal cannot paste yet", "", "x")]
+    monkeypatch.setattr(screens, "system_checks", lambda cfg: checks)
+    monkeypatch.setattr(doctor, "is_cached", lambda *a: False)
+    monkeypatch.setattr(models, "missing_bytes", lambda *a: 2_900_000_000)
+    keys = {"setup": (), "settings": ("s",), "help": ("question_mark",)}[scene]
+
+    async def scenario(app, fake, pilot):
+        await pilot.press(*keys)
+        await pilot.pause(0.3)
+        assert screen_text(app).strip()
+        app.save_screenshot(f"{scene}-{size}.svg", str(folder))
+
+    drive(scenario, size=SIZES[size] if size in SIZES else tuple(map(int, size.split("x"))), setup=scene == "setup",
+          notifications=True)
+    assert (folder / f"{scene}-{size}.svg").stat().st_size > 5_000

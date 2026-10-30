@@ -65,6 +65,11 @@ App.-theme-qal #pill, App.-theme-qal-light #pill { color: $background; }
     text-align: center;
     color: $text-muted;
 }
+#notes {
+    width: 100%;
+    text-align: left;
+    padding-bottom: 1;
+}
 #transcript {
     width: 100%;
     text-align: center;
@@ -112,6 +117,7 @@ HistoryRow {
     & .paste { width: 1; }
     & .ok { color: $success; }  /* not $accent: many built-in themes use the same colour for accent and warning */
     & .no { color: $warning; }
+    & .none { color: $text-muted; }  /* nothing was said: not a failure */
     &.-highlight { background: $primary 20%; }
 }
 #history:focus > HistoryRow.-highlight { background: $primary 35%; }
@@ -130,7 +136,7 @@ Footer {
 #keys {
     width: auto;
     padding: 0 2;
-    color: $text-disabled;
+    color: $text-muted;
 }
 
 /* state colours */
@@ -147,7 +153,8 @@ Screen.-failed #pill { background: $error; }
 Screen.-failed #stage { border: round $error; }
 Screen.-quitting #pill { background: $warning; }
 /* nothing to meter yet: give the rows to the loading message, the start error or the setup warnings */
-Screen.-loading Meter, Screen.-failed Meter, Screen.-failed #hero-title, Screen.-notes.-ready Meter { display: none; }
+Screen.-loading Meter, Screen.-failed Meter, Screen.-loading #hero-title, Screen.-failed #hero-title,
+Screen.-notes.-ready Meter { display: none; }
 Screen.-notes #stage { min-height: 12; }
 
 /* narrow terminals: hotkey reminder moves out of the footer; history text gets the stats' width (the stage
@@ -155,6 +162,12 @@ Screen.-notes #stage { min-height: 12; }
 Screen.-narrow #keys, Screen.-narrow HistoryRow .stats { display: none; }
 Screen.-narrow #mic { display: none; }  /* a cut-off "mic T…" helps nobody */
 Screen.-narrow #status { width: 1fr; padding: 0 2; }
+
+/* under 18 rows: a shorter stage, so the history keeps rows; before the compact block, which wins at 3-5 rows */
+Screen.-short #stage { min-height: 6; max-height: 8; }
+Screen.-short Meter { height: 1; }  /* the rows go to the transcript and the live draft */
+Screen.-short #hero-title { display: none; }
+Screen.-short.-notes #stage { min-height: 7; }
 
 /* compact: a 3-5 line strip (header, meter, up to two text lines, footer) for a small always-visible window */
 Screen.-compact {

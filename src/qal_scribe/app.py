@@ -1,6 +1,9 @@
 """Textual TUI: header with state pill, live mic meter and transcript stage, history, key-hint footer.
 
-Contract: run(cfg) blocks until the user quits. The Controller is built and started in a thread worker so the
+Contract: run(cfg, config_path=None, setup=None) blocks until the user quits (and re-executes itself when the
+settings screen asked for a restart). setup=True opens the setup screen, False never does, None only when
+something is missing. The user's changes are written to `config_path`, the file `cfg` came from.
+The Controller is built and started in a thread worker so the
 window paints immediately; its events reach the UI thread through app.post_message (thread-safe and
 non-blocking, unlike call_from_thread, which would stall the audio callback that emits Level events).
 Importing this module must stay torch-free: heavy modules are imported inside the worker.
@@ -12,6 +15,7 @@ import threading
 import time
 from collections.abc import Callable
 from multiprocessing import resource_tracker
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -21,10 +25,12 @@ from textual.message import Message
 from textual.widgets import Footer, ListView, Static
 from textual.worker import Worker, WorkerState
 
+from qal_scribe import config as config_mod
 from qal_scribe import events as ev
 from qal_scribe import models
 from qal_scribe.config import Config
-from qal_scribe.tui import theme
+from qal_scribe.hotkey import INPUT_MONITORING_REASON, WAYLAND_REASON
+from qal_scribe.tui import screens, theme
 from qal_scribe.tui.widgets import (
     HISTORY_LIMIT,
     MODE_NAMES,
@@ -68,6 +74,20 @@ class StartFailed(Message):
         self.problem = problem
 
 
+def summarize(message: str) -> str:
+    """The short form of a setup warning, for the one-line callout; the whole text is on the setup screen."""
+    known = {INPUT_MONITORING_REASON: "Input Monitoring is off: hotkeys cannot hear the keyboard · press d"}
+    if message in known:
+        return known[message]
+    if message.startswith("no Accessibility permission"):
+        return "Accessibility is off: cannot paste · press d"
+    if message.startswith("cannot type text"):
+        return "No way to type text yet: it goes to the clipboard · press d"
+    first = re.split(r"[;:]", message, maxsplit=1)[0].strip()
+    first = first if len(first) <= 62 else first[:61] + "…"
+    return f"{first} · press d"
+
+
 def mic_name(device: str | int | None = None) -> str | None:
     """Name of the input device the recorder will use (cfg.mic: name substring, index or None = default)."""
     try:
@@ -91,22 +111,36 @@ class QalApp(App):
     CSS_PATH = "tui/qal.tcss"
     ENABLE_COMMAND_PALETTE = False
     HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (110, "-wide")]  # noqa: RUF012 (Textual convention)
-    VERTICAL_BREAKPOINTS = [(0, "-tiny"), (4, "-small")]  # noqa: RUF012 (-tiny: compact drops the footer)
+    # -tiny: compact drops the footer; -short: under 18 rows the stage gives the history its space back
+    VERTICAL_BREAKPOINTS = [(0, "-tiny"), (4, "-short"), (18, "-tall")]  # noqa: RUF012 (Textual convention)
     BINDINGS = [  # noqa: RUF012 (Textual convention)
         Binding("c", "copy", "Copy last"),
+        Binding("a", "copy_source", "Copy Amharic"),
         Binding("l", "language", "Language"),
-        Binding("t", "cycle_theme", "Theme"),
-        Binding("m", "compact", "Compact"),
+        Binding("s", "settings", "Settings"),
+        Binding("d", "setup", "Setup"),
+        Binding("t", "cycle_theme", "Theme", show=False),  # also in Settings; ? lists them
+        Binding("m", "compact", "Compact", show=False),
+        Binding("question_mark", "help", "Help", key_display="?"),
+        Binding("escape", "latest", "Latest", show=False),
         Binding("q", "quit", "Quit"),
     ]
+    ON_BASE = frozenset(("copy", "copy_source", "language", "settings", "setup", "cycle_theme", "compact", "help", "latest"))
 
-    def __init__(self, cfg: Config, controller_factory: Callable = make_controller):
+    def __init__(self, cfg: Config, controller_factory: Callable = make_controller, *,
+                 config_path: Path | None = None, setup: bool | None = None):
         # Textual swaps sys.stderr for an object whose fileno() is -1. The first tqdm bar of a model load makes a
         # multiprocessing lock, which starts this tracker, which hands stderr's fd to its child: start it while
         # stderr is still real.
         resource_tracker.ensure_running()
         super().__init__()
         self.cfg = cfg
+        self.config_path = config_path or config_mod.config_dir() / "config.toml"
+        self.setup_request = setup
+        self.restart = False  # the settings screen asked for a fresh start
+        self.download_thread: threading.Thread | None = None
+        self.browsing: HistoryRow | None = None  # a highlighted history row shown in the stage
+        self.quiet_until = 0.0
         self.controller_factory = controller_factory
         self.controller = None
         self.boot_thread: threading.Thread | None = None
@@ -127,6 +161,11 @@ class QalApp(App):
         self.quitting = False
         self.clean_exit = True  # False when the controller's stop() left a model call running
 
+    @property
+    def base(self):
+        """The main window; settings and setup are screens pushed over it, and App queries hit the top one."""
+        return self.screen_stack[0]
+
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
         yield Stage(id="stage")
@@ -145,15 +184,27 @@ class QalApp(App):
         else:
             self.theme = "qal"
             self.notify(f"unknown theme {self.cfg.theme!r}; using qal", severity="warning")
-        self.screen.set_class(self.cfg.compact, "-compact")
-        self.query_one("#history-panel").border_title = "History"
+        self.base.set_class(self.cfg.compact, "-compact")
+        self.base.query_one("#history-panel").border_title = "History"
         self.set_interval(0.1, self.tick)
         mic = getattr(self.cfg, "mic", None)  # Config.mic arrives with the platform workstream
         self.run_worker(lambda: mic_name(mic), thread=True, name="mic", group="mic", exit_on_error=False)
+        self.refresh_view()
+        needed = screens.setup_needed(self.cfg) if self.setup_request is None else self.setup_request
+        if needed:  # the controller starts when the screen is left: its model load would race the downloads
+            self.push_screen(screens.SetupScreen(self.cfg, explicit=bool(self.setup_request)), self.setup_done)
+        else:
+            self.start_boot()
+
+    def start_boot(self) -> None:
         # A daemon thread, not a Textual worker: those are joined at exit, which would hold `q` hostage
         # until a first-run model download finishes.
-        self.boot_thread = threading.Thread(target=self.boot, name="controller-start", daemon=True)
-        self.boot_thread.start()
+        if self.boot_thread is None:
+            self.boot_thread = threading.Thread(target=self.boot, name="controller-start", daemon=True)
+            self.boot_thread.start()
+
+    def setup_done(self, result: bool | None) -> None:
+        self.start_boot()
         self.refresh_view()
 
     def boot(self) -> None:
@@ -172,7 +223,7 @@ class QalApp(App):
         match message.event:
             case ev.Level(rms):
                 if self.rec_mode:
-                    self.query_one(Meter).push(rms)
+                    self.base.query_one(Meter).push(rms)
                 return
             case ev.Loading(text):
                 self.loading_message = text
@@ -182,13 +233,13 @@ class QalApp(App):
                 self.loading, self.loading_message = False, ""
             case ev.RecordingStarted(mode):
                 self.rec_mode, self.rec_started, self.partial = mode, time.monotonic(), ""
-                self.query_one(Meter).reset()
+                self.base.query_one(Meter).reset()
             case ev.Partial(text):
                 self.partial = text
             case ev.RecordingStopped(mode):
                 self.rec_mode = None
                 self.pending.append(mode)
-                self.query_one(Meter).reset()
+                self.base.query_one(Meter).reset()
             case ev.Transcribed() as done:
                 await self.finish(done)
             case ev.Notice(text, level, clip) as notice:
@@ -197,7 +248,7 @@ class QalApp(App):
                 timeout = 10 if level == "error" else 5
                 if self.info is None:  # a setup problem: a 5 s toast is gone before anyone reads it
                     self.setup.append(notice)
-                elif self.screen.has_class("-compact"):  # a toast would cover the pill and lose its first lines
+                elif self.base.has_class("-compact"):  # a toast would cover the pill and lose its first lines
                     self.flash = notice, time.monotonic() + timeout
                     self.set_timer(timeout, self.refresh_view)
                 else:
@@ -208,7 +259,8 @@ class QalApp(App):
         if self.pending:
             self.pending.pop(0)
         self.last, self.loading_message = done, ""
-        history = self.query_one(ListView)
+        self.browsing, self.quiet_until = None, time.monotonic() + 0.3  # the list re-highlights as it shifts
+        history = self.base.query_one(ListView)
         highlighted = history.index
         await history.insert(0, [HistoryRow(done)])
         if highlighted is not None:  # insert() does not shift the index: keep it on the row that is highlighted
@@ -219,8 +271,14 @@ class QalApp(App):
             history.focus()
 
     def on_start_failed(self, message: StartFailed) -> None:
-        self.failure = message.problem
-        self.notify(message.problem, severity="error", timeout=10)
+        self.failure = message.problem  # shown in the stage with a fix line: no toast saying it twice
+        self.refresh_view()
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if time.monotonic() < self.quiet_until:
+            return
+        row = event.item if isinstance(event.item, HistoryRow) else None
+        self.browsing = row if row and row.entry is not self.last else None
         self.refresh_view()
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -280,15 +338,39 @@ class QalApp(App):
         if not self.info:
             return Content(name)
         model = self.info.model.rsplit("/", 1)[-1]
-        return Content(" · ".join(p for p in [name, model, self.info.device, "LM on" if self.info.lm else "LM off"] if p))
+        on = self.cfg.translation and self.cfg.translate_key
+        translation = f"→EN {self.cfg.translation_model}" if on else "translation off"
+        lm = "LM on" if self.info.lm else ""  # off is the default and there is no room for it at 80 columns
+        return Content(" · ".join(p for p in [name, model, self.info.device, lm, translation] if p))
+
+    def language_name(self) -> str:
+        spec = models.MODELS.get(self.language)
+        return spec.language_name if spec else self.language
+
+    FIXES = (("already running", "another qal-scribe is running: quit it first"),
+             ("input device", "press s to pick a microphone"), ("mic", "press s to pick a microphone"))
+
+    def fix_line(self) -> str:
+        text = self.failure.lower()
+        return next((fix for needle, fix in self.FIXES if needle in text), "run `qal-scribe doctor` to see what is wrong")
+
+    def notes(self) -> list[Content]:
+        """One line per setup problem; the full text is on the setup screen (d)."""
+        lines = []
+        for n in self.setup:
+            if n.message == WAYLAND_REASON:  # the hero already says to bind `qal-scribe toggle`
+                continue
+            lines.append(Content.styled(f"⚠ {summarize(n.message)}", NOTICE_STYLE[n.level]))
+        return lines
 
     def hero(self) -> Content:
         if self.quitting:
             return Content(f"{SPINNER[self.spin]}  Quitting…")
-        if self.failure and self.screen.has_class("-compact"):
-            return Content.assemble(("Could not start: ", "bold $error"), self.failure)
+        if self.failure and self.base.has_class("-compact"):
+            return Content.assemble(("Could not start: ", "bold $error"), self.failure, f" · {self.fix_line()}")
         if self.failure:
-            return Content.assemble(("Could not start\n", "bold $error"), self.failure, "\nPress q to quit.")
+            return Content.assemble(("Could not start\n", "bold $error"), self.failure, "\n", self.fix_line(), "\n",
+                                    ("s Settings · d Setup · q Quit", "$text-muted"))
         if self.loading or not self.info:
             parts: list = [f"{SPINNER[self.spin]}  {self.loading_message}"]
             if percent := PERCENT.search(self.loading_message):
@@ -298,56 +380,69 @@ class QalApp(App):
         if self.pending:
             verb = "Translating" if self.pending[0] == "translate" else "Transcribing"
             return Content(f"{SPINNER[self.spin]}  {verb}…")
-        verbs = {"dictate": "dictate Amharic", "translate": "translate to English"}
+        verbs = {"dictate": f"dictate {self.language_name()}", "translate": "translate to English"}
+        no_keys = any(n.message == INPUT_MONITORING_REASON for n in self.setup)
         lines = [Content.assemble("Hold ", (key, "bold $accent"), f" to {verbs[mode]}")
                  for key, mode in self.hotkeys.items()]
-        if lines:
+        if no_keys:
+            lines = [Content("Hotkeys are off until Input Monitoring is on.")]
+        elif lines:
             lines.append(Content("Release to paste at your cursor."))
         else:  # no global hotkeys here (Wayland)
             lines = [Content.assemble("Run ", ("qal-scribe toggle", "bold $accent"), " (bound to a key) to start "
                                       "and stop")]
             if self.cfg.translation:
                 lines.append(Content.assemble(("qal-scribe toggle --translate", "bold $accent"), " for English"))
-        notes = [Content.styled(n.message, NOTICE_STYLE[n.level]) for n in self.setup]
-        return Content("\n").join([*notes, *lines])
+        return Content("\n").join(lines)
+
+    def notes_view(self) -> Content | None:
+        notes = self.notes()
+        if not notes:
+            return None
+        if self.base.has_class("-compact"):
+            return Content.styled(f"⚠ {len(notes)} setup problem{'s' * (len(notes) > 1)} · press d", "bold $warning")
+        return Content("\n").join([*notes[:3]])
 
     def refresh_view(self) -> None:
         if not self.is_running:  # shutting down: the timer or a late event can fire after widgets are removed
             return
         state = self.state
         for s in STATES:
-            self.screen.set_class(s == state, f"-{s}")
-        self.screen.set_class(bool(self.setup), "-notes")
-        top = self.query_one(TopBar)
+            self.base.set_class(s == state, f"-{s}")
+        self.base.set_class(bool(self.notes()), "-notes")
+        top = self.base.query_one(TopBar)
         top.set_pill(self.pill_label())
         top.set_status(self.status_line(), f" · mic {self.mic}" if self.info and self.mic else "")
         keys = "  ".join(f"{key} {mode}" for key, mode in self.hotkeys.items())
-        self.query_one("#keys", Static).update(keys)
-        stage = self.query_one(Stage)
-        compact = self.screen.has_class("-compact")
+        self.base.query_one("#keys", Static).update(keys)
+        stage = self.base.query_one(Stage)
+        compact = self.base.has_class("-compact")
         stage.border_title = self.stage_title(state)
         stage.border_subtitle = self.stage_subtitle()
         if self.flash and time.monotonic() >= self.flash[1]:
             self.flash = None
+        shown = self.browsing.entry if self.browsing and state == "ready" else self.last
         if self.rec_mode:
             stage.show_transcript(self.partial or "listening…", live=True)
         elif compact and self.flash:
             notice = self.flash[0]
             stage.show_hero(Content.styled(notice.message, NOTICE_STYLE[notice.level]), big=False)
-        elif self.last and not self.last.text and state == "ready":  # a clip in flight shows "Transcribing…"
+        elif shown and not shown.text and state == "ready":  # a clip in flight shows "Transcribing…"
             stage.show_transcript("(nothing recognised)", empty=True)
-        elif self.last and state == "ready":
-            not_pasted = compact and not self.last.pasted  # compact has no border for the subtitle that says so
-            stage.show_transcript(self.last.text + ("  ✗ not pasted" if not_pasted else ""))
+        elif shown and state == "ready":
+            not_pasted = compact and not shown.pasted  # compact has no border for the subtitle that says so
+            stage.show_transcript(shown.text + ("  ✗ not pasted" if not_pasted else ""))
         else:
-            stage.show_hero(self.hero(), big=not (compact or self.setup))
-        history = self.query_one(ListView)
+            ready = state == "ready" and not self.pending
+            stage.show_hero(self.hero(), big=not (compact or self.setup or state in ("loading", "failed")),
+                            notes=self.notes_view() if ready else None)
+        history = self.base.query_one(ListView)
         history.display = bool(len(history))
-        self.query_one("#history-empty").display = not len(history)
+        self.base.query_one("#history-empty").display = not len(history)
         legend = HISTORY_LEGEND
-        if self.screen.has_class("-narrow"):  # which hides the stats column
+        if self.base.has_class("-narrow"):  # which hides the stats column
             legend = legend.removeprefix("audio · compute   ")
-        self.query_one("#history-panel").border_subtitle = legend if len(history) else ""
+        self.base.query_one("#history-panel").border_subtitle = legend if len(history) else ""
 
     def active_mode(self) -> ev.Mode:
         if self.rec_mode or self.pending:
@@ -358,7 +453,9 @@ class QalApp(App):
         if state == "failed":
             return "Error"
         if state == "loading":
-            return "Loading" if self.info else "Starting"
+            return f"Loading {self.language_name()}"
+        if self.browsing and state == "ready":
+            return f"History · {self.browsing.stamp}"
         return MODE_NAMES[self.active_mode()]
 
     def stage_subtitle(self) -> str:
@@ -367,9 +464,9 @@ class QalApp(App):
             return f"release {key} to finish" if key else "run `qal-scribe toggle` again to finish"
         if self.pending:
             return self.loading_message
-        if self.last and self.state == "ready":
-            e = self.last
-            pasted = "pasted" if e.pasted else "not pasted"
+        e = self.browsing.entry if self.browsing and self.state == "ready" else self.last
+        if e and self.state == "ready":
+            pasted = "pasted" if e.pasted else "not pasted" if e.text else "nothing to paste"
             return f"{e.audio_seconds:.1f}s audio · {e.compute_seconds:.2f}s compute · {pasted}"
         return ""
 
@@ -416,10 +513,59 @@ class QalApp(App):
     def action_cycle_theme(self) -> None:
         names = ["qal", "qal-light", *(n for n in self.available_themes if not n.startswith("qal"))]
         self.theme = names[(names.index(self.theme) + 1) % len(names)] if self.theme in names else "qal"
-        self.notify(self.theme, title="theme", timeout=1.5)
+        problem = screens.save_changes(self, {"theme": self.theme})  # the next start remembers it
+        if problem:
+            self.notify(problem, severity="warning", timeout=4)
+        else:
+            self.notify(self.theme, title="theme", timeout=1.5)
+
+    def shown_entry(self) -> ev.Transcribed | None:
+        return self.browsing.entry if self.browsing else self.last
+
+    def action_copy_source(self) -> None:
+        if (e := self.shown_entry()) and e.mode == "translate" and e.raw:
+            self.copy(e.raw)
+
+    def action_latest(self) -> None:
+        self.browsing = None
+        history = self.base.query_one(ListView)
+        if len(history):
+            self.quiet_until = time.monotonic() + 0.3
+            history.index = 0
+        self.refresh_view()
+
+    def action_settings(self) -> None:
+        self.push_screen(screens.SettingsScreen(self.cfg))
+
+    def action_setup(self) -> None:
+        self.push_screen(screens.SetupScreen(self.cfg, explicit=True), self.setup_done)
+
+    def action_help(self) -> None:
+        self.push_screen(screens.HelpScreen())
+
+    def set_keys_paused(self, paused: bool) -> None:
+        """The push-to-talk keys do nothing while the settings screen listens for a new one."""
+        if hotkeys := getattr(self.controller, "hotkeys", None):
+            hotkeys.paused = paused
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        """Footer keys that would do nothing are dimmed (None) or, on another screen, hidden (False)."""
+        if action in self.ON_BASE and self.screen is not self.base:
+            return False
+        match action:
+            case "copy":
+                return True if self.last and self.last.text else None
+            case "copy_source":
+                e = self.shown_entry()
+                return bool(e and e.mode == "translate" and e.raw)
+            case "language":  # while loading or with one model it stays on: its toast says why or how to add one
+                return None if self.failure else True
+            case "compact":
+                return None if self.failure else True
+        return True
 
     def action_compact(self) -> None:
-        self.screen.toggle_class("-compact")
+        self.base.toggle_class("-compact")
         self.refresh_view()
 
     def action_quit(self) -> None:
@@ -435,10 +581,13 @@ class QalApp(App):
         self.run_worker(stop_controller, thread=True, name="stop", group="stop", exit_on_error=False)
 
 
-def run(cfg: Config) -> None:
-    app = QalApp(cfg)
+def run(cfg: Config, config_path: Path | None = None, setup: bool | None = None) -> None:
+    app = QalApp(cfg, config_path=config_path, setup=setup)
     app.run()
-    if (app.boot_thread and app.boot_thread.is_alive()) or not app.clean_exit:
+    sys.stdout.flush()
+    if app.restart:  # exec replaces the process, running threads and all
+        os.execv(sys.executable, [sys.executable, "-m", "qal_scribe", *sys.argv[1:]])
+    threads = (app.boot_thread, app.download_thread)
+    if any(t and t.is_alive() for t in threads) or not app.clean_exit:
         # shortcut: quitting mid-download or mid model call; Python would join their (download) threads first
-        sys.stdout.flush()
         os._exit(0)

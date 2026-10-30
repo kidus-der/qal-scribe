@@ -14,7 +14,7 @@ def isolated(tmp_path, monkeypatch, hf_cache):
     regresses must fail fast, not load weights, open the microphone and block forever."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
 
-    def no_ui(cfg):
+    def no_ui(cfg, *args, **kwargs):
         raise AssertionError("UI started")
 
     monkeypatch.setattr("qal_scribe.plain.run", no_ui)
@@ -169,12 +169,25 @@ def test_first_run_download_failure_is_friendly_before_the_ui_starts(monkeypatch
         raise LocalEntryNotFoundError("cannot reach the Hub")
 
     monkeypatch.setattr(models, "download", offline)
-    for argv in ([], ["--plain"]):  # the TUI runs the model in a worker thread, so it needs this up front
-        message = exit_message(argv)
-        assert "cannot reach the Hub" in message and "qal-scribe models download" in message
+    message = exit_message(["--plain"])  # the TUI downloads on its setup screen instead
+    assert "cannot reach the Hub" in message and "qal-scribe models download" in message
 
 
-def test_models_are_fetched_before_the_ui_only_when_missing(monkeypatch, hf_cache):
+def test_the_tui_does_not_download_before_it_opens(monkeypatch):
+    seen = []
+    monkeypatch.setattr(models, "download", lambda *a, **k: seen.append("speech"))
+    monkeypatch.setattr("qal_scribe.translate.download", lambda *a, **k: seen.append("translation"))
+    monkeypatch.setattr("qal_scribe.app.run", lambda cfg, path=None, setup=None: seen.append((path.name, setup)))
+    cli.main([])
+    cli.main(["setup"])
+    assert seen == [("config.toml", None), ("config.toml", True)]
+
+
+def test_setup_subcommand_parses():
+    assert cli.build_parser().parse_args(["setup"]).command == "setup"
+
+
+def test_models_are_fetched_before_the_plain_output_only_when_missing(monkeypatch, hf_cache):
     from qal_scribe.translate import TRANSLATION_MODELS
 
     spec = models.MODELS["amh"]
@@ -182,15 +195,15 @@ def test_models_are_fetched_before_the_ui_only_when_missing(monkeypatch, hf_cach
     downloads, started = [], []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: downloads.append(with_lm))
     monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
-    monkeypatch.setattr("qal_scribe.app.run", started.append)
-    cli.main([])
+    monkeypatch.setattr("qal_scribe.plain.run", started.append)
+    cli.main(["--plain"])
     assert downloads == [True, "nllb-600m"] and len(started) == 1  # nothing cached
     hf_cache(spec.repo, spec.revision, "model.safetensors")
     hf_cache(nllb.repo, nllb.revision, "pytorch_model.bin")
-    cli.main([])
+    cli.main(["--plain"])
     assert downloads == [True, "nllb-600m", True]  # the language model is still missing
     hf_cache(spec.repo, spec.revision, spec.lm_file)
-    cli.main([])
+    cli.main(["--plain"])
     assert downloads == [True, "nllb-600m", True] and len(started) == 3
 
 
@@ -200,10 +213,10 @@ def test_no_translation_means_no_translation_download(monkeypatch, tmp_path, con
     downloads, started = [], []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
     monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
-    monkeypatch.setattr("qal_scribe.app.run", started.append)
+    monkeypatch.setattr("qal_scribe.plain.run", started.append)
     path = tmp_path / "config.toml"
     path.write_text(config)
-    cli.main([*flags, "--config", str(path)])
+    cli.main(["--plain", *flags, "--config", str(path)])
     assert downloads == [] and started[0].translation == (not flags and "false" not in config)
 
 
@@ -211,10 +224,10 @@ def test_the_chosen_translation_model_is_the_one_fetched(monkeypatch, tmp_path):
     downloads = []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
     monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
-    monkeypatch.setattr("qal_scribe.app.run", lambda cfg: None)
+    monkeypatch.setattr("qal_scribe.plain.run", lambda cfg: None)
     path = tmp_path / "config.toml"
     path.write_text('translation_model = "nllb-1.3b"\n')
-    cli.main(["--config", str(path)])
+    cli.main(["--plain", "--config", str(path)])
     assert downloads == ["nllb-1.3b"]
 
 
@@ -227,8 +240,8 @@ def test_a_failed_translation_download_still_starts_dictation(monkeypatch, capsy
     started = []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
     monkeypatch.setattr("qal_scribe.translate.download", offline)
-    monkeypatch.setattr("qal_scribe.app.run", started.append)
-    cli.main([])
+    monkeypatch.setattr("qal_scribe.plain.run", started.append)
+    cli.main(["--plain"])
     err = capsys.readouterr().err
     assert len(started) == 1 and "cannot reach the Hub" in err and "models download --translation" in err
 

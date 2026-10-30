@@ -1,4 +1,10 @@
-"""Registry of speech models per language, plus first-run download and the fp16 weight cache."""
+"""Registry of speech models per language, plus first-run download and the fp16 weight cache.
+
+Contract: fetch(repo, revision, patterns, progress=None) downloads into the Hugging Face cache and calls
+progress(bytes_done, bytes_total) from the download threads; missing_bytes(...) says what a fetch would download
+(no network use beyond file listings); download_problem(e) is a one-line reason for a network/hub error, else None.
+"""
+import io
 import json
 import os
 import shutil
@@ -87,12 +93,66 @@ def get(language: str) -> ModelSpec:
         raise ValueError(f"no model for language {language!r}; available: {', '.join(MODELS)}") from None
 
 
-def download(spec: ModelSpec, with_lm: bool = False) -> Path:
-    """Fetch the model into the Hugging Face cache (no-op when present) and return the local folder."""
+def progress_bar(progress: Callable[[int, int], None]):
+    """A tqdm class for snapshot_download that reports the aggregate byte count and prints nothing."""
+    from huggingface_hub.utils import tqdm
+
+    class Bar(tqdm):
+        def __init__(self, *args, **kwargs):
+            # hub 2.x makes one byte bar per snapshot, named like this; its other bars count files
+            self.reports = kwargs.get("unit") == "B" and kwargs.get("name") == "huggingface_hub.snapshot_download"
+            self.seen = kwargs.get("initial", 0)  # counted here: a bar the hub disabled does not count itself
+            kwargs["file"] = io.StringIO()  # never drawn
+            super().__init__(*args, **kwargs)
+
+        def update(self, n=1):
+            shown = super().update(n)
+            self.seen += n or 0
+            if self.reports:
+                progress(int(self.seen), int(self.total or 0))
+            return shown
+
+    return Bar
+
+
+def fetch(repo: str, revision: str, patterns: list[str], progress: Callable[[int, int], None] | None = None) -> str:
     from huggingface_hub import snapshot_download
 
-    patterns = ["*.json", "*.safetensors"] + ([spec.lm_file] if with_lm and spec.lm_file else [])
-    return Path(snapshot_download(spec.repo, revision=spec.revision, allow_patterns=patterns))
+    return snapshot_download(repo, revision=revision, allow_patterns=patterns,
+                             tqdm_class=progress_bar(progress) if progress else None)
+
+
+def missing_bytes(repo: str, revision: str, patterns: list[str]) -> int:
+    """What fetch() would download now. Raises the hub's errors when offline."""
+    from huggingface_hub import snapshot_download
+
+    files = snapshot_download(repo, revision=revision, allow_patterns=patterns, dry_run=True,
+                              tqdm_class=progress_bar(lambda *_: None))  # silent: no listing bar over the TUI
+    return sum(f.file_size or 0 for f in files if f.will_download)
+
+
+def patterns_for(spec: ModelSpec, with_lm: bool) -> list[str]:
+    return ["*.json", "*.safetensors"] + ([spec.lm_file] if with_lm and spec.lm_file else [])
+
+
+def download(spec: ModelSpec, with_lm: bool = False, progress: Callable[[int, int], None] | None = None) -> Path:
+    """Fetch the model into the Hugging Face cache (no-op when present) and return the local folder."""
+    return Path(fetch(spec.repo, spec.revision, patterns_for(spec, with_lm), progress))
+
+
+def download_problem(e: BaseException) -> str | None:
+    """One line saying why `e` stopped a download (no network, model not available), or None when `e` is
+    something else."""
+    from huggingface_hub.errors import (
+        HfHubHTTPError,
+        HTTPError,
+        LocalEntryNotFoundError,
+        OfflineModeIsEnabled,
+    )
+
+    if not isinstance(e, HfHubHTTPError | HTTPError | LocalEntryNotFoundError | OfflineModeIsEnabled):
+        return None
+    return str(e).splitlines()[0].removeprefix("Got: ") if str(e) else type(e).__name__
 
 
 MANIFEST = "manifest.json"  # written last: file name -> size, so a half-written or damaged copy is never trusted

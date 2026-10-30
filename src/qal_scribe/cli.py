@@ -1,5 +1,5 @@
 """Command line entry point:
-`qal-scribe [--plain] | doctor | models [download [LANG]] | config [--init] | transcribe FILE | about | toggle`.
+`qal-scribe [--plain] | setup | doctor | models [download [LANG]] | config [--init] | transcribe FILE | about | toggle`.
 
 Errors a user can fix (bad config, no network for the model, unsupported platform) end with one line on stderr
 and exit code 1, never a traceback.
@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     def command(parent, name: str, text: str) -> argparse.ArgumentParser:
         return parent.add_parser(name, help=text, description=text)
 
+    command(sub, "setup", "open the setup screen: permissions, translation choice and model downloads")
     command(sub, "doctor", "check permissions, microphone, device and models")
     m = command(sub, "models", "list available languages and models")
     d = command(m.add_subparsers(dest="models_command"), "download", "fetch model weights now (then it works offline)")
@@ -70,19 +71,15 @@ def interruptible():
 def friendly_download_errors(required: bool = True):
     """Turn "no network / model not available" into a one-line message with the way out: exit, or with
     required=False a warning on stderr, and the caller goes on without the files."""
-    from huggingface_hub.errors import (
-        HfHubHTTPError,
-        HTTPError,
-        LocalEntryNotFoundError,
-        OfflineModeIsEnabled,
-    )
+    from qal_scribe import models
 
     # Offline, the hub retries for 23 s, logging each retry; the one-line failure below says all of it.
     logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
     try:
         yield
-    except (HfHubHTTPError, HTTPError, LocalEntryNotFoundError, OfflineModeIsEnabled) as e:
-        reason = str(e).splitlines()[0].removeprefix("Got: ") if str(e) else type(e).__name__
+    except Exception as e:
+        if (reason := models.download_problem(e)) is None:
+            raise
         if not required:
             print(f"qal-scribe: could not get the translation model; dictation works, translation will not yet:\n"
                   f"  {reason}\nConnect to the internet and run `qal-scribe models download --translation`.",
@@ -278,20 +275,23 @@ def check_config(cfg: Config) -> None:
         fail(f"bad config: {problem}\nSee `qal-scribe config` for its location and `qal-scribe doctor` to check it.")
 
 
-def cmd_run(cfg: Config, plain: bool) -> None:
+def cmd_run(cfg: Config, plain: bool, path: Path | None = None, setup: bool = False) -> None:
     if not sys.platform.startswith(("darwin", "linux")):
         fail(f"{sys.platform} is not supported (macOS and Linux only)")
     check_config(cfg)
-    # The translation model too: fetched inside the TUI it would be GBs behind a spinner, on a key press.
-    fetch_missing_models(cfg, translation=cfg.translation and bool(cfg.translate_key), translation_required=False)
     if plain:
+        # The TUI downloads on its setup screen; with line output the hub's own progress bars do the job.
+        fetch_missing_models(cfg, translation=cfg.translation and bool(cfg.translate_key), translation_required=False)
         from qal_scribe.plain import run
 
         quiet_progress_bars()
-    else:
-        from qal_scribe.app import run
+        with friendly_download_errors():
+            run(cfg)
+        return
+    from qal_scribe.app import run
+
     with friendly_download_errors():
-        run(cfg)
+        run(cfg, path, setup=True if setup else None)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -314,6 +314,8 @@ def main(argv: list[str] | None = None) -> None:
                 if args.config and not path.exists():  # the same check the other commands make
                     fail(f"no config file at {path}")
                 sys.exit(run(path))
+            case "setup":
+                cmd_run(load_config(path, bool(args.config)), False, path, setup=True)
             case "toggle":
                 from qal_scribe.ipc import send_toggle
 
@@ -326,6 +328,6 @@ def main(argv: list[str] | None = None) -> None:
                 cfg = load_config(path, bool(args.config))
                 if args.no_translate:
                     cfg.translation = False
-                cmd_run(cfg, args.plain)
+                cmd_run(cfg, args.plain, path)
     except KeyboardInterrupt:
         sys.exit(130)

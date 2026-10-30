@@ -22,10 +22,11 @@ qal-scribe doctor      # checks permissions, microphone and models, and says how
 qal-scribe             # hold Right Option, speak, release
 ```
 
-The first start downloads the speech model and its language model (about 3 GB), then the translation model
-(2.5 GB); later starts work offline. Ctrl+C cancels a download (the next start begins it again). To skip the
-translation model, set `translation = false` in the config, or start with `qal-scribe --no-translate`. `qal-scribe models download
-[--translation]` fetches the models without starting.
+The first start opens a setup screen: it checks the permissions, lets you turn translation on or off (off skips the
+2.5 GB translation model), shows the download sizes and fetches the models with a progress bar per model. Later starts
+work offline. Press `d` in the app, or run `qal-scribe setup`, to open it again; `s` opens the settings and `?` lists the
+keys. `--no-translate` starts without the translation model for one run. `qal-scribe models download [--translation]`
+fetches the models without starting. Ctrl+C cancels a download (the next start begins it again).
 
 On Linux without an NVIDIA GPU, install the CPU build of PyTorch instead of the multi-GB CUDA one:
 

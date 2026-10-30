@@ -52,3 +52,54 @@ def test_experimental_model_loads_and_handles_silence(code):
     engine.load()
     result = engine.transcribe(np.zeros(16000, dtype="float32"))
     assert isinstance(result.text, str) and "[" not in result.text
+
+
+def test_progress_bar_reports_monotone_bytes_from_the_byte_bar_only():
+    seen = []
+    Bar = models.progress_bar(lambda done, total: seen.append((done, total)))
+    files = Bar(total=3, unit="it", name="huggingface_hub.snapshot_download.thread_map")  # the file-count bar
+    files.update(1)
+    nbytes = Bar(total=0, unit="B", unit_scale=True, name="huggingface_hub.snapshot_download")
+    nbytes.total = 1000  # the hub grows the total as it lists files
+    for chunk in (100, 400, 500):
+        nbytes.update(chunk)
+    assert seen == [(100, 1000), (500, 1000), (1000, 1000)]
+
+
+def test_progress_bar_is_not_silenced_by_disabled_hub_bars():
+    from huggingface_hub.utils import disable_progress_bars, enable_progress_bars
+
+    seen = []
+    disable_progress_bars()
+    try:
+        Bar = models.progress_bar(lambda done, total: seen.append(done))
+        Bar(total=10, unit="B", name="huggingface_hub.snapshot_download").update(10)
+    finally:
+        enable_progress_bars()
+    assert seen == [10]
+
+
+def test_download_passes_the_bar_to_the_hub(monkeypatch, tmp_path):
+    calls = {}
+    monkeypatch.setattr("huggingface_hub.snapshot_download", lambda repo, **kw: calls.update(kw) or str(tmp_path))
+    models.download(models.MODELS["amh"], with_lm=True, progress=lambda d, t: None)
+    assert calls["tqdm_class"] is not None and "lm/am-5gram.bin" in calls["allow_patterns"]
+    models.download(models.MODELS["amh"])
+    assert calls["tqdm_class"] is None
+
+
+def test_missing_bytes_counts_only_files_still_to_download(monkeypatch):
+    from types import SimpleNamespace as File
+
+    files = [File(file_size=5, will_download=True), File(file_size=7, will_download=False),
+             File(file_size=None, will_download=True)]
+    monkeypatch.setattr("huggingface_hub.snapshot_download", lambda repo, **kw: files if kw["dry_run"] else "")
+    assert models.missing_bytes("a/b", "rev", ["*.json"]) == 5
+
+
+def test_download_problem_names_hub_errors_and_ignores_the_rest():
+    from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
+
+    assert models.download_problem(LocalEntryNotFoundError("Cannot reach the hub\nmore")) == "Cannot reach the hub"
+    assert models.download_problem(OfflineModeIsEnabled("offline")) == "offline"
+    assert models.download_problem(KeyError("x")) is None

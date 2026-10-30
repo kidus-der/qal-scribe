@@ -105,10 +105,13 @@ class Stage(Vertical):
         yield Meter(id="meter")
         with Reading(id="reading"):
             yield Static("ቃል", id="hero-title")
+            yield Static("", id="notes")
             yield Static("", id="hero", markup=False)
             yield Static("", id="transcript", markup=False)
 
-    def show_hero(self, lines: Content, big: bool = True) -> None:
+    def show_hero(self, lines: Content, big: bool = True, notes: Content | None = None) -> None:
+        self.query_one("#notes", Static).update(notes or "")
+        self.query_one("#notes").display = notes is not None
         self.query_one("#hero", Static).update(lines)
         self.query_one("#hero-title").display = big
         self.query_one("#hero").display = True
@@ -120,6 +123,7 @@ class Stage(Vertical):
         self.query_one("#transcript", Static).update(text)
         self.query_one("#hero-title").display = False
         self.query_one("#hero").display = False
+        self.query_one("#notes").display = False
         self.query_one("#transcript").display = True
         if live:  # a long draft grows downwards: keep its newest words in view (force: compact hides overflow)
             self.query_one("#reading").scroll_end(animate=False, immediate=True, force=True)
@@ -140,4 +144,5 @@ class HistoryRow(ListItem):
         yield Static(e.text or "(nothing recognised)", classes="text" if e.text else "text empty",
                      markup=False)
         yield Static(stats(e.audio_seconds, e.compute_seconds), classes="stats")
-        yield Static("✓" if e.pasted else "✗", classes="paste ok" if e.pasted else "paste no")
+        mark = ("✓", "ok") if e.pasted else ("✗", "no") if e.text else ("·", "none")  # nothing said is not a failure
+        yield Static(mark[0], classes=f"paste {mark[1]}")

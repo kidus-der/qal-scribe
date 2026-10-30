@@ -14,3 +14,9 @@ def hf_cache(tmp_path, monkeypatch):
         f.write_bytes(b"x")
 
     return put
+
+
+@pytest.fixture(autouse=True)
+def private_config_dir(tmp_path, monkeypatch):
+    """The TUI now writes config.toml (theme, settings): never the user's own."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
