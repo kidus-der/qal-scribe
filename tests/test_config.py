@@ -65,3 +65,43 @@ def test_words_file_that_is_not_utf8_or_not_a_file_names_itself(tmp_path):
 def test_translate_key_default_exists_on_the_platform_keyboard(monkeypatch, platform, key):
     monkeypatch.setattr("sys.platform", platform)
     assert config.Config().translate_key == key
+
+
+def test_save_keeps_comments_and_changes_the_line_in_place(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text('# my note\nsounds = true  # old\n\n# theme = "qal"\nlm = false\n')
+    cfg = config.save(p, {"sounds": False, "theme": "nord"})
+    assert not cfg.sounds and cfg.theme == "nord" and not cfg.lm
+    assert p.read_text() == '# my note\nsounds = false\n\ntheme = "nord"\nlm = false\n'
+    assert config.load(p) == cfg
+
+
+def test_save_uncomments_the_template_line_where_it_is(tmp_path):
+    p = tmp_path / "config.toml"
+    config.save(p, {"mic": "Blue Yeti"})  # missing file: starts from the commented template
+    lines = p.read_text().splitlines()
+    assert 'mic = "Blue Yeti"' in lines and not any(line.startswith("# mic =") for line in lines)
+    assert sum(line.startswith("#") for line in lines) > 20  # the explanations survive
+    assert config.load(p).mic == "Blue Yeti"
+
+
+def test_save_none_removes_the_line_and_appends_unknown_template_keys(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text('mic = "x"\n')
+    config.save(p, {"mic": None, "preview": False})
+    assert p.read_text() == "preview = false\n"
+
+
+def test_save_rejects_bad_values_and_leaves_the_file_alone(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text("sounds = true\n")
+    for changes in ({"translation_model": "nope"}, {"language": "xx"}, {"nonsense": 1}, {"dictate_key": ""},
+                    {"restore_delay": "slow"}):
+        with pytest.raises(ValueError):
+            config.save(p, changes)
+    assert p.read_bytes() == b"sounds = true\n" and not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_writes_text_with_quotes_as_valid_toml(tmp_path):
+    p = tmp_path / "config.toml"
+    assert config.save(p, {"mic": 'Mic "A" \\ 2'}).mic == 'Mic "A" \\ 2'

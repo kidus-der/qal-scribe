@@ -1,9 +1,14 @@
 """User config from ~/.config/qal-scribe/config.toml (or $XDG_CONFIG_HOME). Missing file -> defaults.
 
-Contract: translate_key defaults to cmd_r on macOS, ctrl_r elsewhere. load(path=None) -> Config (ValueError for unknown keys or wrong types); load_words(cfg) -> the words.txt
-replacements, {heard: wanted} (ValueError naming the file when it cannot be read as UTF-8 text).
+Contract: translate_key defaults to cmd_r on macOS, ctrl_r elsewhere. parse(text, path) / load(path=None) -> Config
+(ValueError for unknown keys or wrong types); save(path, {key: value}) edits those lines in place, keeping every
+comment, checks the result like load() plus doctor.config_problem, and replaces the file atomically (ValueError
+leaves it untouched; a None value removes the line); load_words(cfg) -> the words.txt replacements, {heard: wanted}
+(ValueError naming the file when it cannot be read as UTF-8 text).
 """
+import json
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, field, fields
@@ -77,9 +82,11 @@ def load_words(cfg: Config) -> dict[str, str]:
 
 def load(path: Path | None = None) -> Config:
     path = path or config_dir() / "config.toml"
-    if not path.exists():
-        return Config()
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return parse(path.read_text(encoding="utf-8"), path) if path.exists() else Config()
+
+
+def parse(text: str, path: Path) -> Config:
+    data = tomllib.loads(text)
     known = {f.name for f in fields(Config)}
     unknown = set(data) - known
     if unknown:
@@ -88,3 +95,49 @@ def load(path: Path | None = None) -> Config:
     if "words_file" in data:
         data["words_file"] = Path(data["words_file"]).expanduser()
     return Config(**data)
+
+
+def toml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return json.dumps(value) if isinstance(value, str) else repr(value)  # a JSON string is a TOML basic string
+
+
+def edit(text: str, key: str, value: object | None) -> str:
+    """`text` with the `key = value` line replaced where it is, else where the template comments it out, else
+    appended; value None removes an active line."""
+    lines = text.splitlines()
+    active = next((i for i, line in enumerate(lines) if re.match(rf"\s*{key}\s*=", line)), None)
+    if value is None:
+        if active is not None:
+            del lines[active]
+    else:
+        new = f"{key} = {toml_value(value)}"
+        template = next((i for i, line in enumerate(lines) if re.match(rf"#\s*{key}\s*=", line)), None)
+        if active is not None or template is not None:
+            lines[template if active is None else active] = new
+        else:
+            lines.append(new)
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def save(path: Path, changes: dict[str, object | None]) -> Config:
+    from importlib.resources import files
+
+    from qal_scribe.doctor import config_problem
+
+    known = {f.name for f in fields(Config)}
+    if unknown := set(changes) - known:
+        raise ValueError(f"unknown keys: {', '.join(sorted(unknown))}")
+    text = (path.read_text(encoding="utf-8") if path.exists()
+            else files("qal_scribe").joinpath("default_config.toml").read_text(encoding="utf-8"))
+    for key, value in changes.items():
+        text = edit(text, key, value)
+    cfg = parse(text, path)
+    if problem := config_problem(cfg):
+        raise ValueError(problem)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+    return cfg
