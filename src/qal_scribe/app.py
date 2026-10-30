@@ -407,7 +407,7 @@ class QalApp(App):
         state = self.state
         for s in STATES:
             self.base.set_class(s == state, f"-{s}")
-        self.base.set_class(bool(self.setup), "-notes")
+        self.base.set_class(bool(self.notes()), "-notes")
         top = self.base.query_one(TopBar)
         top.set_pill(self.pill_label())
         top.set_status(self.status_line(), f" · mic {self.mic}" if self.info and self.mic else "")

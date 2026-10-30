@@ -8,11 +8,16 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, "tests")
+from unittest import mock
+
 from test_tui import READY, SAMPLE, FakeController, SetupWarnings, done, drive, screen_text, send
 from test_tui_screenshots import WARNING, fill_history, speak
 
+from qal_scribe import doctor, models
 from qal_scribe import events as ev
 from qal_scribe.config import Config
+from qal_scribe.doctor import Check
+from qal_scribe.tui import screens
 
 OUT = Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
@@ -48,7 +53,7 @@ class F13(FakeController):
         self.emit(dataclasses.replace(READY, hotkeys={"f13": "dictate"}))
 
 
-def shot(name, scene, size=(120, 36), cfg=None, factory=None):
+def shot(name, scene, size=(120, 36), cfg=None, factory=None, setup=False):
     async def scenario(app, fake, pilot):
         await scene(pilot)
         await pilot.pause(0.2)
@@ -56,7 +61,7 @@ def shot(name, scene, size=(120, 36), cfg=None, factory=None):
         (OUT / f"{name}.txt").write_text(screen_text(app))
 
     drive(scenario, size=size, cfg=cfg, factory=(lambda c, e: factory(c, e)) if factory else None,
-          notifications=True)
+          notifications=True, setup=setup)
 
 
 async def nothing(pilot):
@@ -93,3 +98,24 @@ for size, tag in [((80, 5), "80x5"), ((40, 3), "40x3")]:
     shot(f"compact-recording-{tag}", speak, size, cfg=compact)
     shot(f"compact-loading-{tag}", nothing, size, cfg=compact, factory=Downloading)
     shot(f"compact-perms-{tag}", nothing, size, cfg=compact, factory=MacPermissions)
+
+
+# The new screens. Nothing cached and two permissions missing, as on a fresh Mac; no network is used.
+CHECKS = [Check("Microphone permission", "ok", "granted"),
+          Check("Accessibility", "fail", "Terminal cannot paste yet", "", "x"),
+          Check("Input Monitoring", "fail", "the hotkeys cannot hear the keyboard", "", "y")]
+
+
+async def press(pilot, *keys):
+    await pilot.press(*keys)
+    await pilot.pause(0.3)
+
+
+with (mock.patch.object(screens, "system_checks", lambda cfg: CHECKS),
+      mock.patch.object(doctor, "is_cached", lambda *a: False),
+      mock.patch.object(models, "missing_bytes", lambda *a: 2_900_000_000)):
+    for size, tag in [((120, 36), "120"), ((80, 24), "80")]:
+        shot(f"setup-{tag}", nothing, size, setup=True)
+        shot(f"settings-{tag}", lambda pilot: press(pilot, "s"), size)
+        shot(f"help-{tag}", lambda pilot: press(pilot, "question_mark"), size)
+        shot(f"macperms-callouts-{tag}", nothing, size, factory=MacPermissions)
