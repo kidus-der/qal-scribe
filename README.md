@@ -8,8 +8,9 @@ downloaded nothing leaves it.
   them). **Linux** works and is in beta.
 - Speech model: [snapwre/hohe-asr-amharic](https://huggingface.co/snapwre/hohe-asr-amharic) (wav2vec2-BERT 600M,
   CC-BY-4.0), decoded with its KenLM language model. On an Apple GPU a 10 s clip takes about 0.15 s.
-- Translation: [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)
-  (CC-BY-NC-4.0: **non-commercial use only**).
+- Translation (optional, can be turned off): [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)
+  by default (CC-BY-NC-4.0: **non-commercial use only**); larger models are a setting, see
+  [docs/translation.md](docs/translation.md).
 
 ## Install
 
@@ -103,12 +104,15 @@ most likely to change:
 | Setting | Default | |
 |---|---|---|
 | `dictate_key`, `translate_key` | `"alt_r"`, `"cmd_r"` (Linux: `"ctrl_r"`; Apple keyboards have no Right Control) | [pynput key names](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) such as `ctrl_r`, `shift_r`, `f13`; `translate_key = ""` turns translation off |
+| `translation` | `true` | `false` turns translation off: no translate key, and the translation model is never downloaded or loaded (for small machines) |
+| `translation_model` | `"nllb-600m"` | `"nllb-1.3b"` instead; see [docs/translation.md](docs/translation.md) for the measured differences |
 | `mic` | system default | part of a microphone's name, or its number |
 | `numbers_to_digits` | `false` | write spoken numbers as digits: ሁለት ሺህ አስራ ሰባት → 2017 |
 | `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
 | `punctuation` | `false` | add ። ? and ፣ by rule (**experimental**, see below) |
 | `lm` | `true` | decode with the language model; `false` is plain greedy decoding |
 | `sounds` | `true` | short sound when recording starts and stops |
+| `indicator` | `true` | macOS: a small floating pill, "Listening" while you hold the key and "Transcribing…" after, so you can see it works while the terminal is hidden; it never takes focus. Ignored on Linux |
 
 Run `qal-scribe doctor` after editing to check the file.
 
@@ -156,7 +160,7 @@ measured from Amharic (NLLB has no Sidaama or Wolaytta), and the text clean-up s
 ## Commands
 
 ```
-qal-scribe                     start dictating (terminal UI)
+qal-scribe [--no-translate]    start dictating (terminal UI); --no-translate: dictation only
 qal-scribe --plain             the same, one line per event
 qal-scribe doctor              check permissions, microphone, device, config and models
 qal-scribe models              list languages and whether each model is downloaded
@@ -170,8 +174,8 @@ qal-scribe about               licences and model attribution
 ## Licence
 
 The code is MIT licensed. The models are downloaded at run time and keep their own licences: the Amharic speech
-model is CC-BY-4.0 and the translation model is CC-BY-NC-4.0, which allows **non-commercial use only**.
-`qal-scribe about` lists them all.
+model is CC-BY-4.0 and the NLLB translation models (`nllb-600m`, `nllb-1.3b`) are CC-BY-NC-4.0, which allows
+**non-commercial use only**. `qal-scribe about` lists them all.
 
 ## Development
 

@@ -194,10 +194,10 @@ def test_unticking_translation_writes_the_config_and_drops_its_row(setup_env):
 def test_choosing_a_model_is_saved_and_shows_its_licence(setup_env):
     async def scenario(app, fake, pilot):
         await pilot.pause()
-        app.screen.query_one("#tr-model").value = "madlad-3b"
+        app.screen.query_one("#tr-model").value = "nllb-1.3b"
         await pilot.pause()
-        assert app.cfg.translation_model == "madlad-3b" and 'translation_model = "madlad-3b"' in config_file().read_text()
-        assert "free to use commercially" in screen_text(app)
+        assert app.cfg.translation_model == "nllb-1.3b" and 'translation_model = "nllb-1.3b"' in config_file().read_text()
+        assert "non-commercial use only" in screen_text(app)
 
     drive(scenario, setup=True)
 
@@ -669,9 +669,9 @@ def test_help_lists_the_configured_keys_and_any_key_closes_it():
 
 def test_the_status_line_says_whether_translation_is_on():
     async def scenario(app, fake, pilot):
-        assert "→EN madlad-3b" in shown_status(app)
+        assert "→EN nllb-1.3b" in shown_status(app)
 
-    drive(scenario, cfg=Config(translation_model="madlad-3b"))
+    drive(scenario, cfg=Config(translation_model="nllb-1.3b"))
 
     async def off(app, fake, pilot):
         assert "translation off" in shown_status(app)

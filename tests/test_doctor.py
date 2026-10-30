@@ -53,25 +53,25 @@ def test_translation_off_is_ok_not_a_warning(hf_cache):
 
 
 def test_doctor_checks_the_chosen_translation_model(hf_cache):
-    madlad = TRANSLATION_MODELS["madlad-3b"]
-    cfg = Config(translation_model="madlad-3b")
+    big = TRANSLATION_MODELS["nllb-1.3b"]
+    cfg = Config(translation_model="nllb-1.3b")
     check = doctor.check_translation(cfg)
-    assert check.status == "warn" and madlad.repo in check.detail and "11.8 GB" in check.detail
-    hf_cache(madlad.repo, madlad.revision, "model.safetensors")
+    assert check.status == "warn" and big.repo in check.detail and "5.5 GB" in check.detail
+    hf_cache(big.repo, big.revision, "pytorch_model.bin")
     assert doctor.check_translation(cfg).status == "ok"
 
 
 def test_unknown_translation_model_is_a_config_problem():
-    assert "nllb-600m, nllb-1.3b, madlad-3b" in doctor.config_problem(Config(translation_model="gpt"))
+    assert "nllb-600m, nllb-1.3b" in doctor.config_problem(Config(translation_model="gpt"))
 
 
 def test_disk_need_grows_with_the_translation_model(monkeypatch):
     import shutil
 
-    monkeypatch.setattr(shutil, "disk_usage", lambda _: type("Usage", (), {"free": 10_000_000_000})())
+    monkeypatch.setattr(shutil, "disk_usage", lambda _: type("Usage", (), {"free": 8_000_000_000})())
     assert doctor.check_disk(Config()).status == "ok"
-    assert doctor.check_disk(Config(translation_model="madlad-3b")).status == "warn"
-    assert doctor.check_disk(Config(translation_model="madlad-3b", translation=False)).status == "ok"
+    assert doctor.check_disk(Config(translation_model="nllb-1.3b")).status == "warn"
+    assert doctor.check_disk(Config(translation_model="nllb-1.3b", translation=False)).status == "ok"
 
 
 def test_check_config(tmp_path):
