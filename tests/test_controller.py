@@ -78,7 +78,7 @@ class FakeTranslator:
 
 
 def make(monkeypatch, tmp_path, pasted=True, **engine_kw):
-    cfg = config.Config(words_file=tmp_path / "words.txt", sounds=False)
+    cfg = config.Config(words_file=tmp_path / "words.txt", sounds=False, translate_key="ctrl_r")
     out = []
     c = controller.Controller(cfg, out.append)
     c.engine, c.recorder = FakeEngine(models.get("amh"), **engine_kw), FakeRecorder()
@@ -572,3 +572,17 @@ def test_notices_that_end_a_clip_say_so(monkeypatch, tmp_path):
     c.stop()
     worker.join(3)
     assert [(e.level, e.clip) for e in out] == [("warning", True), ("error", True)]
+
+
+def test_failed_clip_plays_the_error_cue(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.sounds = True
+    cues = []
+    monkeypatch.setattr(controller, "play_cue", cues.append)
+    c.engine.transcribe = lambda audio, sentences=False: 1 / 0
+    worker = start_worker(c)
+    c._clips.put(("dictate", AUDIO))
+    wait_for(lambda: cues)
+    c.stop()
+    worker.join(3)
+    assert cues == ["error"]

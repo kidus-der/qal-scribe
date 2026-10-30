@@ -27,6 +27,11 @@ def test_order_word_list_then_homophones_then_numbers_then_punctuation():
     assert process("ኤክስ ዋጋው ሃያ ብር ነው", cfg, {"ኤክስ": "ሶስት"}) == "3 ዋጋው 20 ብር ነው።"
 
 
+def test_amharic_cleanups_leave_other_languages_alone():
+    cfg = Config(language="tir", merge_homophones=True, numbers_to_digits=True, punctuation=True)
+    assert process("ሠላም ሁለት", cfg) == "ሠላም ሁለት"
+
+
 def test_features_are_independent():
     assert process("ሠላም ሁለት", Config(merge_homophones=True)) == "ሰላም ሁለት"
     assert process("ሠላም ሁለት", NUMBERS) == "ሠላም 2"

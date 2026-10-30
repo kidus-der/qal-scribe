@@ -1,9 +1,10 @@
 """User config from ~/.config/qal-scribe/config.toml (or $XDG_CONFIG_HOME). Missing file -> defaults.
 
-Contract: load(path=None) -> Config (ValueError for unknown keys or wrong types); load_words(cfg) -> the words.txt
+Contract: translate_key defaults to cmd_r on macOS, ctrl_r elsewhere. load(path=None) -> Config (ValueError for unknown keys or wrong types); load_words(cfg) -> the words.txt
 replacements, {heard: wanted} (ValueError naming the file when it cannot be read as UTF-8 text).
 """
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -13,11 +14,15 @@ def config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "qal-scribe"
 
 
+def default_translate_key() -> str:
+    return "cmd_r" if sys.platform == "darwin" else "ctrl_r"  # Apple keyboards have no Right Control
+
+
 @dataclass
 class Config:
     language: str = "amh"
     dictate_key: str = "alt_r"  # pynput Key name
-    translate_key: str | None = "ctrl_r"  # None disables the translate hotkey
+    translate_key: str | None = field(default_factory=default_translate_key)  # None disables the translate hotkey
     translation: bool = True  # False: no translate hotkey, and the translation model is never fetched or loaded
     translation_model: str = "nllb-600m"  # see translate.TRANSLATION_MODELS
     device: str | None = None  # None = auto (mps > cuda > cpu)

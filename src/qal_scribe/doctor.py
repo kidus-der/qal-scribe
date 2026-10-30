@@ -72,7 +72,7 @@ def config_problem(cfg: Config) -> str | None:
         return None  # no display here (e.g. headless Linux); the platform checks report that
     for key in (cfg.dictate_key, cfg.translate_key):
         if key and key not in keyboard.Key.__members__:
-            return f"unknown key {key!r}: use a pynput key name such as alt_r, ctrl_r, cmd_r or f13"
+            return f"unknown key {key!r}: use a pynput key name such as alt_r, cmd_r, ctrl_r or f13"
     return None
 
 

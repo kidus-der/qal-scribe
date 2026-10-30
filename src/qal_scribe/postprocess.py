@@ -51,11 +51,12 @@ def process(text: str, cfg: Config, words: dict[str, str] | None = None) -> str:
     text = " ".join(text.split())
     if words:
         text = replace_words(text, words)
-    if cfg.merge_homophones:
+    amharic = cfg.language == "amh"  # these rewrite Amharic spelling: they would corrupt Tigrinya's real letters
+    if cfg.merge_homophones and amharic:
         text = fold_homophones(text)
-    if cfg.numbers_to_digits:
+    if cfg.numbers_to_digits and amharic:
         text = numbers_to_digits(text)
-    if cfg.punctuation:
+    if cfg.punctuation and amharic:
         text = add_punctuation(text)
     return " ".join(text.split())
 
