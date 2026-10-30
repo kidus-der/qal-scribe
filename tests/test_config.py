@@ -85,7 +85,7 @@ def test_save_uncomments_the_template_line_where_it_is(tmp_path):
     assert config.load(p).mic == "Blue Yeti"
 
 
-def test_save_none_removes_the_line_and_appends_unknown_template_keys(tmp_path):
+def test_save_none_removes_the_line_and_appends_new_keys(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text('mic = "x"\n')
     config.save(p, {"mic": None, "preview": False})

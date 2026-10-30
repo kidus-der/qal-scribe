@@ -69,19 +69,15 @@ def interruptible():
 def friendly_download_errors(required: bool = True):
     """Turn "no network / model not available" into a one-line message with the way out: exit, or with
     required=False a warning on stderr, and the caller goes on without the files."""
-    from huggingface_hub.errors import (
-        HfHubHTTPError,
-        HTTPError,
-        LocalEntryNotFoundError,
-        OfflineModeIsEnabled,
-    )
+    from qal_scribe import models
 
     # Offline, the hub retries for 23 s, logging each retry; the one-line failure below says all of it.
     logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
     try:
         yield
-    except (HfHubHTTPError, HTTPError, LocalEntryNotFoundError, OfflineModeIsEnabled) as e:
-        reason = str(e).splitlines()[0].removeprefix("Got: ") if str(e) else type(e).__name__
+    except Exception as e:
+        if (reason := models.download_problem(e)) is None:
+            raise
         if not required:
             print(f"qal-scribe: could not get the translation model; dictation works, translation will not yet:\n"
                   f"  {reason}\nConnect to the internet and run `qal-scribe models download --translation`.",

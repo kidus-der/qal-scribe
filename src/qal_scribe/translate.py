@@ -41,11 +41,11 @@ TRANSLATION_MODELS: dict[str, TranslationSpec] = {
 DEFAULT_MODEL = "nllb-600m"
 
 
-def download(model: str = DEFAULT_MODEL) -> str:
-    from huggingface_hub import snapshot_download
+def download(model: str = DEFAULT_MODEL, progress=None) -> str:
+    from qal_scribe import models
 
     spec = TRANSLATION_MODELS[model]
-    return snapshot_download(spec.repo, revision=spec.revision, allow_patterns=list(spec.patterns))
+    return models.fetch(spec.repo, spec.revision, list(spec.patterns), progress)
 
 
 # NLLB is trained on sentences; longer unpunctuated runs (raw ASR output) degrade or truncate.
