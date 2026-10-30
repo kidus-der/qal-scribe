@@ -236,7 +236,7 @@ def test_disk_warns_when_low(monkeypatch, hf_cache):
 def run_with(monkeypatch, tmp_path, **checks):
     ok = Check("x", "ok", "fine")
     defaults = {"check_system": ok, "check_device": ok, "check_microphone": ok, "check_microphone_permission": None,
-                "check_paste": ok, "check_input_monitoring": None, "check_disk": ok}
+                "check_paste": ok, "check_input_monitoring": None, "check_hotkeys": None, "check_disk": ok}
     for name, result in {**defaults, **checks}.items():
         monkeypatch.setattr(doctor, name, lambda *_, result=result: result)
     return doctor.run(tmp_path / "config.toml")

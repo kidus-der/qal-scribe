@@ -192,7 +192,7 @@ def test_model_progress_bars_in_the_boot_thread_do_not_break_the_start(tmp_path)
         "        self.emit(ev.Ready('cpu', 'm', 'amh', False, {}))\n"
         "    def stop(self): pass\n"
         "async def go():\n"
-        "    app = app_mod.QalApp(Config(), controller_factory=Fake)\n"
+        "    app = app_mod.QalApp(Config(), controller_factory=Fake, setup=False)\n"
         "    async with app.run_test() as pilot:\n"
         "        await asyncio.to_thread(app.boot_thread.join, 20)\n"
         "        await pilot.pause()\n"
