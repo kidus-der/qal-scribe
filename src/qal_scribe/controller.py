@@ -219,6 +219,8 @@ class Controller:
                 self.handle(mode, audio)
             except Exception as e:  # noqa: BLE001 - keep the tool alive; show the error instead of dying in a thread
                 self.emit(ev.Notice(f"{type(e).__name__}: {e}", "error", clip=True))
+                if self.cfg.sounds:
+                    play_cue("error")
 
     def handle(self, mode: ev.Mode, audio: np.ndarray) -> None:
         if len(audio) < SAMPLE_RATE // 4 or np.abs(audio).max() < 1e-3:

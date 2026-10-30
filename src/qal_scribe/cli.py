@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import NoReturn
 
 from qal_scribe import __version__
-from qal_scribe.config import Config
+from qal_scribe.config import Config, default_translate_key
+from qal_scribe.hotkey import key_label
 
-EPILOG = ("Run with no command to start dictating: hold Right Option to dictate Amharic, Right Control for "
-          "English text. The first run downloads the speech model (about 3 GB).")
+EPILOG = (f"Run with no command to start dictating: hold {key_label(Config.dictate_key)} to dictate Amharic, "
+          f"{key_label(default_translate_key())} for English text. The first run downloads the speech model (about 3 GB).")
 
 
 def build_parser() -> argparse.ArgumentParser:
