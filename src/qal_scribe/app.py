@@ -27,7 +27,7 @@ from textual.worker import Worker, WorkerState
 
 from qal_scribe import config as config_mod
 from qal_scribe import events as ev
-from qal_scribe import models
+from qal_scribe import models, update
 from qal_scribe.config import Config
 from qal_scribe.hotkey import INPUT_MONITORING_REASON, WAYLAND_REASON
 from qal_scribe.tui import screens, theme
@@ -190,12 +190,19 @@ class QalApp(App):
         self.set_interval(0.1, self.tick)
         mic = getattr(self.cfg, "mic", None)  # Config.mic arrives with the platform workstream
         self.run_worker(lambda: mic_name(mic), thread=True, name="mic", group="mic", exit_on_error=False)
+        if self.cfg.check_updates:
+            self.run_worker(self.check_updates, thread=True, name="updates", group="updates", exit_on_error=False)
         self.refresh_view()
         needed = screens.setup_needed(self.cfg) if self.setup_request is None else self.setup_request
         if needed:  # the controller starts when the screen is left: its model load would race the downloads
             self.push_screen(screens.SetupScreen(self.cfg, explicit=bool(self.setup_request)), self.setup_done)
         else:
             self.start_boot()
+
+    def check_updates(self) -> None:
+        if new := update.available():
+            self.call_from_thread(self.notify, f"qal-scribe {new} is out: quit, then run `qal-scribe update`",
+                                  title="Update available", timeout=20)
 
     def start_boot(self) -> None:
         # A daemon thread, not a Textual worker: those are joined at exit, which would hold `q` hostage

@@ -289,6 +289,18 @@ def check_translation(cfg: Config) -> Check:
                  "`qal-scribe models download --translation`, or `qal-scribe setup`")
 
 
+def check_updates(cfg: Config) -> Check | None:
+    from qal_scribe import __version__, update
+
+    if not cfg.check_updates:
+        return None
+    if new := update.available():
+        return Check("Updates", "warn", f"qal-scribe {new} is out (you have {__version__})", "run: qal-scribe update")
+    if update.latest() is None:
+        return Check("Updates", "ok", f"{__version__}; could not reach PyPI to compare")
+    return Check("Updates", "ok", f"{__version__} is the newest")
+
+
 def check_disk(cfg: Config | None = None) -> Check:
     from huggingface_hub.constants import HF_HUB_CACHE
 
@@ -310,7 +322,8 @@ def run(path: Path) -> int:
     with console.status("checking…"):  # the first torch import after an install takes ~10 s
         config_check, cfg = check_config(path)
         checks = [check_system(), check_device(cfg), check_microphone(cfg.mic), check_microphone_permission(),
-                  check_paste(), check_input_monitoring(), check_hotkeys(), config_check, *check_models(cfg), check_disk(cfg)]
+                  check_paste(), check_input_monitoring(), check_hotkeys(), config_check, *check_models(cfg), check_disk(cfg),
+                  check_updates(cfg)]
     checks = [c for c in checks if c]
     table = Table(title="qal-scribe doctor", title_justify="left", header_style="bold")
     with_fix = any(c.fix for c in checks)

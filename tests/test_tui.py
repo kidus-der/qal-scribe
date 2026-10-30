@@ -834,3 +834,19 @@ def test_mic_name_follows_the_configured_device_and_never_raises(monkeypatch):
     assert app_mod.mic_name() == "USB Mic" and app_mod.mic_name("2") == "USB Mic"
     assert asked == [None, 2]  # "2" in a config file means device index 2
     assert app_mod.mic_name("missing") is None
+
+
+def test_a_newer_release_shows_an_update_notice(monkeypatch):
+    from qal_scribe import update
+
+    monkeypatch.setattr(update, "available", lambda force=False: "9.0.0")
+
+    async def scenario(app, fake, pilot):
+        await pilot.pause(0.2)
+        assert any("9.0.0" in n.message and "qal-scribe update" in n.message for n in app._notifications)
+
+    drive(scenario)
+    asked = []
+    monkeypatch.setattr(update, "available", lambda force=False: asked.append(1))  # a worker would swallow a raise
+    drive(lambda app, fake, pilot: pilot.pause(0.2), cfg=Config(check_updates=False))
+    assert asked == []

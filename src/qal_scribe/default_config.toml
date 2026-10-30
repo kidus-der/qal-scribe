@@ -57,6 +57,10 @@
 # so you can see it works with the terminal hidden. macOS only; ignored on Linux.
 # indicator = true
 
+# Once a day at start, ask PyPI whether a newer qal-scribe is out and say so (`qal-scribe update` installs it).
+# Sends nothing about you; offline it stays quiet.
+# check_updates = true
+
 # Terminal UI. Themes: qal, qal-light, or a built-in Textual theme such as nord, gruvbox, dracula,
 # tokyo-night, catppuccin-mocha, solarized-light or textual-dark (press t in the window to try them all).
 # theme = "qal"

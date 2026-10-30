@@ -43,6 +43,7 @@ class Config:
     mic: str | None = None  # input device name (substring) or index; None = system default
     preview: bool = True  # show a live draft while recording
     indicator: bool = True  # macOS: floating "Listening" pill while the terminal is hidden; ignored elsewhere
+    check_updates: bool = True  # ask PyPI once a day whether a newer qal-scribe is out
 
 
 # What TOML must hold for each field type; TOML has no null, so "str | None" fields are strings too.

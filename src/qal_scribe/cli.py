@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("file", help="wav, flac, ogg or mp3 (m4a: convert it first); any sample rate, mono or stereo")
     t.add_argument("--translate", action="store_true", help="translate to English")
     command(sub, "about", "licences and model attribution")
+    command(sub, "update", "install the newest qal-scribe from PyPI (uv tool installs)")
     tg = command(sub, "toggle", "start/stop recording in the running instance (for Wayland key bindings)")
     tg.add_argument("--translate", action="store_true", help="translate to English")
     return p
@@ -182,6 +183,25 @@ def cmd_about() -> None:
     print(files("qal_scribe").joinpath("NOTICE").read_text(encoding="utf-8"))
 
 
+def cmd_update() -> None:
+    import shutil
+    import subprocess
+
+    from qal_scribe import update
+
+    new = update.available(force=True)
+    if new is None:
+        if update.latest() is None:
+            fail("could not reach PyPI; check the connection and try again")
+        print(f"qal-scribe {__version__} is the newest version.")
+        return
+    command = update.upgrade_command()
+    if not update.is_uv_tool() or not shutil.which("uv"):
+        fail(f"{new} is out, but this copy was not installed with `uv tool install`; update it with: {' '.join(command)}")
+    print(f"Updating qal-scribe {__version__} -> {new}: {' '.join(command)}", flush=True)
+    sys.exit(subprocess.call(command))
+
+
 def resample(audio, rate: int, to: int):
     """Band-limited (FFT) resampling of a whole file: phones and QuickTime record at 44.1 or 48 kHz."""
     import numpy as np
@@ -308,6 +328,8 @@ def main(argv: list[str] | None = None) -> None:
                 cmd_models(args)
             case "about":
                 cmd_about()
+            case "update":
+                cmd_update()
             case "doctor":
                 from qal_scribe.doctor import run
 

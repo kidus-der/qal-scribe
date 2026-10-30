@@ -70,12 +70,22 @@ next to anything that is wrong.
 
 ## Upgrade
 
+When a new version is out, qal-scribe says so when it starts (it asks PyPI at most once a day; turn this off
+with `check_updates = false`) and `qal-scribe doctor` shows it too. To install it, quit qal-scribe and run:
+
+```sh
+qal-scribe update
+```
+
+That runs the right uv command for your install, including keeping the CPU build of PyTorch on Linux. Versions
+before 1.0.2 don't have `update`; upgrade them once with:
+
 ```sh
 uv tool upgrade qal-scribe
 ```
 
-On Linux with the CPU build, upgrade with the install line plus `--upgrade` instead: uv does not remember
-`--torch-backend`, and `uv tool upgrade` may fetch the CUDA build.
+On Linux with the CPU build, use the install line plus `--upgrade` instead (uv does not remember
+`--torch-backend`, and `uv tool upgrade` may fetch the CUDA build):
 
 ```sh
 uv tool install --python 3.12 qal-scribe --torch-backend cpu --upgrade

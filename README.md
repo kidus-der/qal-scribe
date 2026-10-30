@@ -31,7 +31,8 @@ qal-scribe
 ```
 
 The first start opens a setup screen that walks you through the permissions and downloads the models
-(about 3 GB, plus 2.5 GB if you want translation). After that it works offline. The full guide, including
+(about 3 GB, plus 2.5 GB if you want translation). After that it works offline. When a new version is out,
+qal-scribe tells you; `qal-scribe update` installs it. The full guide, including
 Linux, is in [docs/install.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/install.md).
 
 ## What it does
@@ -208,6 +209,7 @@ qal-scribe transcribe FILE [--translate]       an audio file (wav, flac, ogg, mp
 qal-scribe config [--init]     show (or create) the config file
 qal-scribe toggle [--translate]                start/stop recording in the running instance
 qal-scribe about               licences and model attribution
+qal-scribe update              install the newest version from PyPI
 ```
 
 </details>

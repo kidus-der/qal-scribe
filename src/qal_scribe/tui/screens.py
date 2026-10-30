@@ -562,6 +562,7 @@ SETTINGS = [
     Setting("translate_key", "Translate key", "Hold to record and paste English", "key", False),
     Setting("theme", "Theme", "Colours of this window", "select", True),
     Setting("compact", "Compact", "A small strip for an always-visible window", "switch", True),
+    Setting("check_updates", "Check for updates", "Once a day, ask PyPI for a newer version", "switch", False),
 ]
 
 

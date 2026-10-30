@@ -4,6 +4,7 @@ import sys
 import threading
 
 from qal_scribe import events as ev
+from qal_scribe import update
 from qal_scribe.config import Config
 from qal_scribe.controller import Controller
 
@@ -35,6 +36,8 @@ def run(cfg: Config) -> None:
         if line:
             print(line, flush=True)
 
+    if cfg.check_updates and (new := update.available()):
+        print(f"qal-scribe {new} is out: quit, then run `qal-scribe update`", flush=True)
     controller = None
     try:
         controller = Controller(cfg, emit)

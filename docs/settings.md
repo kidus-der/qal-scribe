@@ -61,6 +61,7 @@ the key you want.
 | `restore_delay` | `0.5` | seconds before your clipboard is put back after pasting. Raise it if an app pastes your old clipboard instead | no |
 | `sounds` | `true` | short sounds when recording starts, stops or fails. `v` on the main screen mutes them | live |
 | `indicator` | `true` | macOS only: a small floating pill at the bottom of the screen, "Listening" while you hold the key and "Transcribing…" after, even when the terminal is hidden. It never takes focus. Ignored on Linux | no |
+| `check_updates` | `true` | once a day at start, ask PyPI whether a newer qal-scribe is out and say so (`qal-scribe update` installs it). Sends nothing about you; offline it stays quiet | no |
 | `theme` | `"qal"` | colours: `qal`, `qal-light`, or a built-in Textual theme such as `nord`, `gruvbox`, `dracula`, `tokyo-night`. `t` in the window cycles them | live |
 | `compact` | `false` | a 3 to 5 line strip for a small, always-visible window. `m` toggles it for now | live |
 

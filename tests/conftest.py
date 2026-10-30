@@ -20,3 +20,17 @@ def hf_cache(tmp_path, monkeypatch):
 def private_config_dir(tmp_path, monkeypatch):
     """The TUI now writes config.toml (theme, settings): never the user's own."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+
+
+@pytest.fixture(autouse=True)
+def offline_update_check(tmp_path, monkeypatch):
+    """No test asks the real PyPI or touches the real update cache; tests that need a reply patch urlopen."""
+    import urllib.request
+
+    from qal_scribe import update
+
+    def no_network(*_, **__):
+        raise OSError("tests are offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", no_network)
+    monkeypatch.setattr(update, "cache_dir", lambda: tmp_path / "cache")

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+### New
+- **Updates.** qal-scribe now tells you when a newer version is out (it asks PyPI at most once a day; turn it off
+  with `check_updates = false`), and `qal-scribe update` installs it. `qal-scribe doctor` shows it too.
+  Upgrading from 1.0.1 or older still needs `uv tool upgrade qal-scribe` once.
+
 ## 1.0.1
 
 ### New
