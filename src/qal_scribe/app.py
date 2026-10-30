@@ -305,8 +305,9 @@ class QalApp(App):
             lines.append(Content("Release to paste at your cursor."))
         else:  # no global hotkeys here (Wayland)
             lines = [Content.assemble("Run ", ("qal-scribe toggle", "bold $accent"), " (bound to a key) to start "
-                                      "and stop"),
-                     Content.assemble(("qal-scribe toggle --translate", "bold $accent"), " for English")]
+                                      "and stop")]
+            if self.cfg.translation:
+                lines.append(Content.assemble(("qal-scribe toggle --translate", "bold $accent"), " for English"))
         notes = [Content.styled(n.message, NOTICE_STYLE[n.level]) for n in self.setup]
         return Content("\n").join([*notes, *lines])
 

@@ -67,8 +67,8 @@ Amharic. `qal-scribe transcribe FILE` uses the same setting. Switching back is `
 
 ## Things that are Amharic-only
 
-- **Translation (Right Control)** was measured for Amharic -> English only. Tigrinya, Oromo and Somali are passed
-  to NLLB-200 as their own languages, untested. NLLB does not know Sidaama or Wolaytta: there Right Control keeps
+- **Translation (Right Command, Right Control on Linux)** was measured for Amharic -> English only. Tigrinya, Oromo and Somali are passed
+  to NLLB-200 as their own languages, untested. NLLB does not know Sidaama or Wolaytta: there the translate key keeps
   the transcript in the history and says that it cannot translate.
 - **Homophone merging, number words to digits and punctuation** are written for Amharic. Leave them off for the
   other languages; merging homophones would rewrite real Tigrinya letters.

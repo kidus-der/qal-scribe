@@ -78,7 +78,7 @@ class FakeTranslator:
 
 
 def make(monkeypatch, tmp_path, pasted=True, **engine_kw):
-    cfg = config.Config(words_file=tmp_path / "words.txt", sounds=False)
+    cfg = config.Config(words_file=tmp_path / "words.txt", sounds=False, translate_key="ctrl_r")
     out = []
     c = controller.Controller(cfg, out.append)
     c.engine, c.recorder = FakeEngine(models.get("amh"), **engine_kw), FakeRecorder()
@@ -127,6 +127,28 @@ def test_ready_reports_whether_the_lm_is_active(monkeypatch, tmp_path):
     ready = c._ready()
     assert ready.lm is True and ready.language == "amh" and ready.hotkeys == {"Right Option": "dictate",
                                                                               "Right Control": "translate"}
+
+
+def test_translation_off_registers_no_translate_key_and_refuses_toggle(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.translation = False
+    c.hotkeys = FakeHotkeys()
+    assert c.keys() == {"alt_r": "dictate"}
+    with pytest.raises(RuntimeError, match="translation is off"):
+        c.toggle("translate")
+    assert not c.recorder.active
+
+
+def test_the_translator_gets_the_configured_model(monkeypatch, tmp_path):
+    from qal_scribe import translate
+
+    seen = []
+    monkeypatch.setattr(translate.Translator, "load", lambda self: seen.append(self.name))
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.translation_model = "nllb-1.3b"
+    del c._new_translator  # use the real one
+    c._new_translator()
+    assert seen == ["nllb-1.3b"]
 
 
 def test_ready_lists_no_keys_when_none_can_be_heard(monkeypatch, tmp_path):
@@ -550,6 +572,20 @@ def test_notices_that_end_a_clip_say_so(monkeypatch, tmp_path):
     c.stop()
     worker.join(3)
     assert [(e.level, e.clip) for e in out] == [("warning", True), ("error", True)]
+
+
+def test_failed_clip_plays_the_error_cue(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.sounds = True
+    cues = []
+    monkeypatch.setattr(controller, "play_cue", cues.append)
+    c.engine.transcribe = lambda audio, sentences=False: 1 / 0
+    worker = start_worker(c)
+    c._clips.put(("dictate", AUDIO))
+    wait_for(lambda: cues)
+    c.stop()
+    worker.join(3)
+    assert cues == ["error"]
 
 
 # --- recording indicator ---------------------------------------------------------------------------------------
