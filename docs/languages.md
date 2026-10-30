@@ -79,7 +79,7 @@ Amharic. `qal-scribe transcribe FILE` uses the same setting. Switching back is `
 Each model's licence is on its model card and in the Hugging Face API; the links above are the cards.
 
 - The four `badrex/Ethio-ASR-*` models are **CC-BY-4.0**: use and redistribution are allowed with credit
-  (see `NOTICE`). They are fine-tuned from `facebook/w2v-bert-2.0` on the
+  (see `src/qal_scribe/NOTICE`). They are fine-tuned from `facebook/w2v-bert-2.0` on the
   [WAXAL](https://huggingface.co/datasets/google/WaxalNLP) speech data. WAXAL lists the Digital Umuganda
   languages (Oromo, Sidaama, Tigrinya, Wolaytta) as CC-BY-SA-4.0. Whether a data licence reaches trained
   weights is unsettled; the authors publish the weights under CC-BY-4.0 and qal-scribe relies on that.

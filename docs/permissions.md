@@ -23,7 +23,7 @@ On the setup screen:
    that list. If macOS shows a prompt, allow it.
 2. If the switch is still off, press **Open Settings** again: it opens the right pane. Turn your terminal on.
 3. When all three are on, **quit the terminal with ⌘Q** and open it again. macOS applies some of these only to
-   a freshly started app; until then the Input Monitoring row says "restart (your terminal) to finish".
+   a freshly started app; until then the Input Monitoring row says "restart Terminal to finish" (with your terminal app's name, or "your terminal app").
 
 The microphone row says "not asked yet" until you first record: macOS asks then. If you once said no, macOS
 does not ask again, so turn it on in the Microphone pane instead.
