@@ -58,7 +58,8 @@ def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipb
           setup=False):
     """Run `scenario(app, fake, pilot)` against the app (fake = the FakeController it started).
     clipboard=False: the system clipboard is unreachable. notifications=True draws toasts (screenshots).
-    setup=True: the setup screen opens at start (False: it never does, whatever this machine has cached)."""
+    setup=True: the setup screen opens at start; False: it never does, whatever this machine has cached;
+    None: only when something is missing, as in real use."""
     made: list[FakeController] = []
 
     def make(c, emit):
@@ -69,7 +70,7 @@ def drive(scenario, *, size=(120, 36), cfg=None, hold=False, factory=None, clipb
         app = QalApp(cfg or Config(), controller_factory=factory or make, setup=setup,
                      config_path=Path(os.environ["XDG_CONFIG_HOME"]) / "qal-scribe" / "config.toml")
         async with app.run_test(size=size, notifications=notifications) as pilot:
-            if not hold and not setup:
+            if not hold and setup is False:
                 await settle(pilot)
             await scenario(app, made[0] if made else None, pilot)
 

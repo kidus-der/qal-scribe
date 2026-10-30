@@ -132,7 +132,7 @@ class SizeKnown(Message):
         self.key, self.nbytes = key, nbytes
 
 
-class CheckRow(Horizontal):
+class CheckRow(Vertical):
     """One permission / system check: mark, name, what is wrong, and a button when there is something to open."""
 
     def __init__(self, check: Check) -> None:
@@ -140,17 +140,21 @@ class CheckRow(Horizontal):
         self.check = check
 
     def compose(self) -> ComposeResult:
-        yield Static("", classes="mark")
-        yield Static(self.check.name, classes="name")
-        yield Static("", classes="detail")
-        yield Button("Open Settings", name=self.check.name, classes="fix")
+        with Horizontal(classes="line"):
+            yield Static("", classes="mark")
+            yield Static(self.check.name, classes="name")
+            yield Static("", classes="detail")
+            yield Button("Open Settings", name=self.check.name, classes="fix", compact=True)
+        yield Static("", classes="command")  # Linux: the install command, selectable
 
-    def show(self, check: Check, detail: str) -> None:
+    def show(self, check: Check, detail: str, command: str = "") -> None:
         self.check = check
         mark, colour = MARKS[check.status]
         self.query_one(".mark", Static).update(Content.styled(mark, f"bold {colour}"))
         self.query_one(".detail", Static).update(detail)
         self.query_one(".fix", Button).display = check.status != "ok" and bool(check.url)
+        self.query_one(".command", Static).update(command)
+        self.query_one(".command").display = bool(command)
 
 
 class SetupScreen(Screen[bool]):
@@ -169,15 +173,16 @@ class SetupScreen(Screen[bool]):
         height: auto; margin-top: 1; padding: 0 1; background: $surface; border: round $border;
         border-title-color: $text-muted; border-title-style: bold;
     }
-    SetupScreen .check { height: auto; }
+    SetupScreen .check, SetupScreen .line { height: auto; }
     SetupScreen .check .mark { width: 2; }
-    SetupScreen .check .name { width: 20; }
+    SetupScreen .check .name { width: 24; }
     SetupScreen .check .detail { width: 1fr; color: $text-muted; }
-    SetupScreen .check .fix { min-width: 16; margin-left: 1; }
+    SetupScreen .check .fix { margin-left: 1; }
+    SetupScreen #checks, SetupScreen #items { height: auto; }
     SetupScreen .command { padding-left: 2; color: $accent; }
     SetupScreen .note { color: $text-muted; }
-    SetupScreen #tr-row { height: 3; }
-    SetupScreen #tr-row Static { padding: 1 1; }
+    SetupScreen Switch { border: none; padding: 0 1; }
+    SetupScreen #tr-row { height: 1; }
     SetupScreen #tr-info { color: $text-muted; }
     SetupScreen .item { height: auto; margin-top: 1; }
     SetupScreen #actions { height: 3; align-horizontal: right; margin-top: 1; }
@@ -210,9 +215,11 @@ class SetupScreen(Screen[bool]):
                         yield Static("Translation to English")
                     yield Select([(f"{k}  ·  {t.size_gb:g} GB  ·  {t.license}", k)
                                   for k, t in TRANSLATION_MODELS.items()], value=self.cfg.translation_model,
-                                 allow_blank=False, id="tr-model")
+                                 allow_blank=False, id="tr-model", compact=True)
                     yield Static("", id="tr-info")
-                yield Vertical(id="items")
+                with Vertical(id="items"):
+                    for key in ("speech", "translation"):  # hidden while the config does not use that model
+                        yield Static("", id=f"item-{key}", classes="item")
                 yield Static("", id="problem")
                 with Horizontal(id="actions"):
                     yield Button("Download", id="download", variant="primary")
@@ -227,7 +234,7 @@ class SetupScreen(Screen[bool]):
         self.query_one("#models").border_title = "Models"
         self.poll()
         self.set_interval(1, self.poll)
-        self.refresh_models()
+        self.show_items()
         self.measure()
 
     # -- permissions / system ---------------------------------------------------------------------------
@@ -251,11 +258,7 @@ class SetupScreen(Screen[bool]):
             detail = c.detail
             if c.name == "Input Monitoring" and c.status != "ok" and c.name in self.asked:
                 detail = f"restart {terminal} to finish"
-            row.show(c, detail)
-            for old in row.query(".command"):
-                old.remove()
-            if c.status != "ok" and sys.platform != "darwin" and c.fix:
-                row.mount(Static(c.fix, classes="command"))
+            row.show(c, detail, c.fix if c.status != "ok" and sys.platform != "darwin" else "")
         failing = any(c.status != "ok" for c in self.checks)
         if sys.platform == "darwin":
             hint = f"After turning one on, quit {terminal} (⌘Q) and reopen it." if failing else ""
@@ -307,22 +310,15 @@ class SetupScreen(Screen[bool]):
                 control.value = getattr(self.cfg, next(iter(changes)))
             return
         self.todo = items(self.cfg)
-        self.refresh_models()
+        self.show_items()
         self.measure()
 
-    def refresh_models(self) -> None:
-        box = self.query_one("#items")
-        box.remove_children()
-        for item in self.todo:
-            box.mount(Static("", id=f"item-{item.key}", classes="item"))
-        self.call_after_refresh(self.show_items)
-
     def show_items(self) -> None:
-        for item in self.todo:
-            try:
-                self.query_one(f"#item-{item.key}", Static).update(self.item_line(item))
-            except Exception:  # noqa: BLE001 - the row is not mounted yet: the next message redraws it
-                return
+        for row in self.query(".item"):
+            item = next((i for i in self.todo if f"item-{i.key}" == row.id), None)
+            row.display = item is not None
+            if item:
+                row.update(self.item_line(item))
         if self.ask:
             t = TRANSLATION_MODELS[self.cfg.translation_model]
             terms = "non-commercial use only" if "NC" in t.license else "free to use commercially"
@@ -410,6 +406,9 @@ class SetupScreen(Screen[bool]):
     def action_continue(self) -> None:
         self.dismiss(True)
 
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        return sys.platform != "darwin" if action == "copy_command" else True
+
 
 # -- settings ---------------------------------------------------------------------------------------------
 
@@ -444,8 +443,8 @@ class KeyCapture(ModalScreen[str | None]):
         with Vertical(id="capture"):
             yield Static(f"Press the key you want for {self.label}. Esc cancels.", id="capture-prompt")
             yield Static("", id="capture-error")
-            yield Select(options, prompt="Choose a key", id="capture-list")
-            yield Button("Choose from a list instead", id="capture-fallback")
+            yield Select(options, prompt="Choose a key", id="capture-list", compact=True)
+            yield Button("Choose from a list instead", id="capture-fallback", compact=True)
 
     def on_mount(self) -> None:
         self.app.set_keys_paused(True)
@@ -561,11 +560,11 @@ class SettingsScreen(Screen):
     SettingsScreen #rows { align-horizontal: center; }
     SettingsScreen #settings { width: 76; max-width: 100%; height: auto; padding: 0 1; }
     SettingsScreen .row { height: auto; margin-top: 1; }
+    SettingsScreen Switch { border: none; padding: 0 1; }
     SettingsScreen .text { width: 1fr; height: auto; }
     SettingsScreen .help { color: $text-muted; }
     SettingsScreen .badge { color: $warning; }
-    SettingsScreen .control { width: 32; }
-    SettingsScreen Select, SettingsScreen Button { width: 32; }
+    SettingsScreen .row > Select, SettingsScreen .row > Button { width: 30; }
     SettingsScreen #problem { color: $error; padding: 0 1; height: auto; }
     """
 
@@ -582,35 +581,36 @@ class SettingsScreen(Screen):
                 with Horizontal(classes="row"):
                     with Vertical(classes="text"):
                         yield Static(Content.styled(s.label, "bold"))
-                        yield Static(self.help_text(s), classes="help", id=f"help-{s.key}")
+                        yield Static(self.help_line(s), classes="help", id=f"help-{s.key}")
                         if not s.live:
                             yield Static("applies at restart", classes="badge")
                     yield self.control(s)
         yield Footer(show_command_palette=False)
 
-    def help_text(self, s: Setting) -> str:
+    def help_line(self, s: Setting) -> Content:
+        text = s.help
         if s.key == "translation" and self.cfg.translation:
             t = TRANSLATION_MODELS[self.cfg.translation_model]
             if not doctor.is_cached(t.repo, t.revision, t.weights):
-                return f"downloads {t.size_gb:g} GB at restart"
-        return s.help
+                text = f"downloads {t.size_gb:g} GB at restart"
+        return Content(text)
 
     def control(self, s: Setting):
         value = getattr(self.cfg, s.key)
         match s.kind:
             case "switch":
-                return Switch(value, id=f"set-{s.key}", classes="control")
+                return Switch(value, id=f"set-{s.key}")
             case "mic":
                 return Select([(value or "System default", value or "")], value=value or "", allow_blank=False,
-                              id="set-mic")
+                              id="set-mic", compact=True)
             case "key":
-                return Button(self.key_text(s.key), id=f"set-{s.key}")
+                return Button(self.key_text(s.key), id=f"set-{s.key}", compact=True)
             case _ if s.key == "theme":
                 return Select([(n, n) for n in self.theme_names()], value=value if value in self.theme_names()
-                              else "qal", allow_blank=False, id="set-theme")
+                              else "qal", allow_blank=False, id="set-theme", compact=True)
             case _:
                 return Select([(f"{k}  ·  {t.size_gb:g} GB", k) for k, t in TRANSLATION_MODELS.items()],
-                              value=value, allow_blank=False, id="set-translation_model")
+                              value=value, allow_blank=False, id="set-translation_model", compact=True)
 
     def theme_names(self) -> list[str]:
         return ["qal", "qal-light", *(n for n in self.app.available_themes if not n.startswith("qal"))]
@@ -654,8 +654,7 @@ class SettingsScreen(Screen):
             self.restart_needed = True
             self.refresh_bindings()
         if key in ("translation", "translation_model"):
-            self.query_one("#help-translation", Static).update(self.help_text(next(
-                s for s in SETTINGS if s.key == "translation")))
+            self.query_one("#help-translation", Static).update(self.help_line(SETTINGS[0]))
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         self.apply(event.switch.id.removeprefix("set-"), event.value, event.switch)
