@@ -5,7 +5,7 @@ import torch
 import transformers
 
 from qal_scribe import translate
-from qal_scribe.translate import MAX_WORDS, Translator, split_sentences
+from qal_scribe.translate import MAX_WORDS, TRANSLATION_MODELS, Translator, split_sentences
 
 
 def test_split_on_ethiopic_and_latin_marks():
@@ -96,7 +96,7 @@ def fake_hub(monkeypatch):
 
     class Tokenizer:
         @staticmethod
-        def from_pretrained(path, src_lang):
+        def from_pretrained(path, src_lang=None):
             calls["src_lang"] = src_lang
             tok = FakeTokenizer()
             tok.convert_tokens_to_ids = lambda t: calls.setdefault("target", t) and 7
@@ -111,7 +111,8 @@ def fake_hub(monkeypatch):
 def test_load_pins_revision_and_languages(fake_hub):
     t = Translator("cpu")
     t.load()
-    assert fake_hub["repo"] == Translator.MODEL and fake_hub["revision"] == Translator.REVISION
+    nllb = TRANSLATION_MODELS["nllb-600m"]
+    assert fake_hub["repo"] == nllb.repo and fake_hub["revision"] == nllb.revision
     assert fake_hub["src_lang"] == translate.SRC_LANG and fake_hub["target"] == translate.TGT_LANG
     assert fake_hub["dtype"] == torch.float32 and fake_hub["device"] == "cpu"
 
@@ -121,6 +122,22 @@ def test_load_uses_float16_on_gpu_and_falls_back_to_cpu(fake_hub):
     t.load()
     assert fake_hub["dtype"] == torch.float16
     assert t.device == "cpu" and fake_hub["device"] == "cpu" and fake_hub["float"]
+
+
+def test_madlad_loads_in_bfloat16_and_tags_the_target_language(fake_hub):
+    t = Translator("mps", model="madlad-3b")
+    t.load()
+    assert fake_hub["repo"] == "google/madlad400-3b-mt" and fake_hub["dtype"] == torch.bfloat16
+    assert fake_hub["src_lang"] is None and not hasattr(t, "target_id")  # no NLLB language codes
+    t.model, t.tokenizer = FakeModel(), FakeTokenizer()
+    t.translate("ሰላም ነው። ደህና ነህ፧")
+    assert t.tokenizer.sentences == ["<2en> ሰላም ነው።", "<2en> ደህና ነህ፧"]
+    assert "forced_bos_token_id" not in t.model.kw
+
+
+def test_the_registry_pins_every_model_to_a_revision():
+    assert set(TRANSLATION_MODELS) == {"nllb-600m", "nllb-1.3b", "madlad-3b"}
+    assert all(len(s.revision) == 40 for s in TRANSLATION_MODELS.values())
 
 
 def test_load_is_idempotent(fake_hub):

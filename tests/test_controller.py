@@ -129,6 +129,28 @@ def test_ready_reports_whether_the_lm_is_active(monkeypatch, tmp_path):
                                                                               "Right Control": "translate"}
 
 
+def test_translation_off_registers_no_translate_key_and_refuses_toggle(monkeypatch, tmp_path):
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.translation = False
+    c.hotkeys = FakeHotkeys()
+    assert c.keys() == {"alt_r": "dictate"}
+    with pytest.raises(RuntimeError, match="translation is off"):
+        c.toggle("translate")
+    assert not c.recorder.active
+
+
+def test_the_translator_gets_the_configured_model(monkeypatch, tmp_path):
+    from qal_scribe import translate
+
+    seen = []
+    monkeypatch.setattr(translate.Translator, "load", lambda self: seen.append(self.name))
+    c, _ = make(monkeypatch, tmp_path)
+    c.cfg.translation_model = "nllb-1.3b"
+    del c._new_translator  # use the real one
+    c._new_translator()
+    assert seen == ["nllb-1.3b"]
+
+
 def test_ready_lists_no_keys_when_none_can_be_heard(monkeypatch, tmp_path):
     c, _ = make(monkeypatch, tmp_path)
     c.hotkeys = FakeHotkeys()

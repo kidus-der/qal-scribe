@@ -46,6 +46,14 @@ def test_plain_format_ready():
     assert "hold Right Option to dictate" in line and "LM on" in line
 
 
+def test_plain_ready_without_hotkeys_mentions_translate_only_when_it_is_on():
+    from qal_scribe import events as ev
+    from qal_scribe.plain import format_event
+
+    ready = ev.Ready("mps", "m", "amh", True, {})
+    assert "toggle --translate" in format_event(ready) and "toggle --translate" not in format_event(ready, False)
+
+
 def test_about_prints_the_packaged_notice(capsys):
     cli.main(["about"])
     out = capsys.readouterr().out
@@ -119,6 +127,10 @@ def test_models_download_translation(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda repo, **kw: f"fetched {repo} {kw['revision'][:7]}")
     cli.main(["models", "download", "--translation"])
     assert "fetched facebook/nllb-200-distilled-600M" in capsys.readouterr().out
+    path = tmp_path / "config.toml"
+    path.write_text('translation_model = "nllb-1.3b"\n')
+    cli.main(["--config", str(path), "models", "download", "--translation"])
+    assert "fetched facebook/nllb-200-distilled-1.3B" in capsys.readouterr().out
 
 
 def test_models_download_unknown_language():
@@ -149,44 +161,58 @@ def test_first_run_download_failure_is_friendly_before_the_ui_starts(monkeypatch
 
 
 def test_models_are_fetched_before_the_ui_only_when_missing(monkeypatch, hf_cache):
-    from qal_scribe.translate import Translator
+    from qal_scribe.translate import TRANSLATION_MODELS
 
     spec = models.MODELS["amh"]
+    nllb = TRANSLATION_MODELS["nllb-600m"]
     downloads, started = [], []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: downloads.append(with_lm))
-    monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
+    monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
     monkeypatch.setattr("qal_scribe.app.run", started.append)
     cli.main([])
-    assert downloads == [True, "nllb"] and len(started) == 1  # nothing cached
+    assert downloads == [True, "nllb-600m"] and len(started) == 1  # nothing cached
     hf_cache(spec.repo, spec.revision, "model.safetensors")
-    hf_cache(Translator.MODEL, Translator.REVISION, "pytorch_model.bin")
+    hf_cache(nllb.repo, nllb.revision, "pytorch_model.bin")
     cli.main([])
-    assert downloads == [True, "nllb", True]  # the language model is still missing
+    assert downloads == [True, "nllb-600m", True]  # the language model is still missing
     hf_cache(spec.repo, spec.revision, spec.lm_file)
     cli.main([])
-    assert downloads == [True, "nllb", True] and len(started) == 3
+    assert downloads == [True, "nllb-600m", True] and len(started) == 3
 
 
-def test_no_translate_key_means_no_translation_download(monkeypatch, tmp_path):
+@pytest.mark.parametrize("config, flags", [('translate_key = ""\n', []), ("translation = false\n", []),
+                                           ("", ["--no-translate"])])
+def test_no_translation_means_no_translation_download(monkeypatch, tmp_path, config, flags):
+    downloads, started = [], []
+    monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
+    monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
+    monkeypatch.setattr("qal_scribe.app.run", started.append)
+    path = tmp_path / "config.toml"
+    path.write_text(config)
+    cli.main([*flags, "--config", str(path)])
+    assert downloads == [] and started[0].translation == (not flags and "false" not in config)
+
+
+def test_the_chosen_translation_model_is_the_one_fetched(monkeypatch, tmp_path):
     downloads = []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
-    monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
+    monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append(model))
     monkeypatch.setattr("qal_scribe.app.run", lambda cfg: None)
     path = tmp_path / "config.toml"
-    path.write_text('translate_key = ""\n')
+    path.write_text('translation_model = "madlad-3b"\n')
     cli.main(["--config", str(path)])
-    assert downloads == []
+    assert downloads == ["madlad-3b"]
 
 
 def test_a_failed_translation_download_still_starts_dictation(monkeypatch, capsys):
     from huggingface_hub.errors import LocalEntryNotFoundError
 
-    def offline():
+    def offline(model):
         raise LocalEntryNotFoundError("cannot reach the Hub")
 
     started = []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: None)
-    monkeypatch.setattr(cli, "download_translation", offline)
+    monkeypatch.setattr("qal_scribe.translate.download", offline)
     monkeypatch.setattr("qal_scribe.app.run", started.append)
     cli.main([])
     err = capsys.readouterr().err
@@ -242,9 +268,10 @@ def test_help_says_how_to_start_and_subcommands_describe_themselves(capsys):
 def test_models_lists_aligned_columns_and_the_translation_model(capsys):
     cli.main(["models"])
     lines = capsys.readouterr().out.splitlines()
-    table = lines[: len(models.MODELS) + 2]
-    assert "facebook/nllb-200-distilled-600M" in table[-1] and "not downloaded" in table[-1]
-    assert len({line.index("CC-BY") for line in table[1:]}) == 1  # one licence column
+    table = lines[: len(models.MODELS) + 2 + 2]
+    assert "facebook/nllb-200-distilled-600M" in table[-3] and "not downloaded" in table[-3]
+    assert "google/madlad400-3b-mt" in table[-1] and "Apache-2.0" in table[-1]
+    assert len({re.search(r"CC-BY|Apache", line).start() for line in table[1:]}) == 1  # one licence column
     assert lines[-1].startswith("download one with: qal-scribe models download LANG")
 
 
@@ -331,7 +358,7 @@ def test_transcribe_a_missing_file_says_so(tmp_path):
 def test_transcribe_says_on_stderr_when_it_downloads_first(tmp_path, capsys, monkeypatch, fake_engine, hf_cache):
     downloads = []
     monkeypatch.setattr(models, "download", lambda spec, with_lm=False: downloads.append(spec.language))
-    monkeypatch.setattr(cli, "download_translation", lambda: downloads.append("nllb"))
+    monkeypatch.setattr("qal_scribe.translate.download", lambda model: downloads.append("nllb"))
     monkeypatch.setattr("qal_scribe.translate.Translator.load", lambda self: None)
     asked = []
     monkeypatch.setattr("qal_scribe.translate.Translator.translate",
