@@ -1,83 +1,126 @@
-# qal-scribe
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kidus-der/qal-scribe/main/docs/assets/banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/kidus-der/qal-scribe/main/docs/assets/banner.svg">
+    <img alt="qal-scribe: hold a key, speak Amharic, let go, and it types at your cursor" src="https://raw.githubusercontent.com/kidus-der/qal-scribe/main/docs/assets/banner.svg" width="820">
+  </picture>
+</p>
 
-On-device push-to-talk dictation for Amharic. Hold a key, speak, let go: the text appears wherever your cursor is.
-A second key turns Amharic speech into English text. Everything runs on your computer; after the models are
-downloaded nothing leaves it.
+<p align="center">
+  <a href="https://pypi.org/project/qal-scribe/"><img alt="PyPI" src="https://img.shields.io/pypi/v/qal-scribe?color=1d7a4f"></a>
+  <a href="https://github.com/kidus-der/qal-scribe/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kidus-der/qal-scribe/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-1d7a4f">
+  <a href="https://github.com/kidus-der/qal-scribe/blob/main/LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-1d7a4f"></a>
+</p>
 
-- **macOS** on Apple Silicon is the main platform (Intel Macs are not supported: PyTorch no longer builds for
-  them). **Linux** works and is in beta.
-- Speech model: [snapwre/hohe-asr-amharic](https://huggingface.co/snapwre/hohe-asr-amharic) (wav2vec2-BERT 600M,
-  CC-BY-4.0), decoded with its KenLM language model. On an Apple GPU a 10 s clip takes about 0.15 s.
-- Translation: [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)
-  (CC-BY-NC-4.0: **non-commercial use only**).
+**qal-scribe** (ቃል, *qal*, means "word") is push-to-talk dictation for Amharic that runs entirely on your
+computer. Hold a key, speak, let go: the text appears wherever your cursor is, in any app. A second key turns
+Amharic speech into English text.
+
+<p align="center">
+  <img alt="The qal-scribe window: setup, ready, recording with a live draft, history, a translation and the settings" src="https://raw.githubusercontent.com/kidus-der/qal-scribe/main/docs/assets/demo.svg" width="820">
+</p>
 
 ## Install
 
-You need [uv](https://docs.astral.sh/uv/getting-started/installation/).
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/) and a Mac with Apple Silicon (Linux works too, in beta).
 
 ```sh
 uv tool install --python 3.12 qal-scribe
-qal-scribe doctor      # checks permissions, microphone and models, and says how to fix what is missing
-qal-scribe             # hold Right Option, speak, release
+qal-scribe
 ```
 
-The first start opens a setup screen: it checks the permissions, lets you turn translation on or off (off skips the
-2.5 GB translation model), shows the download sizes and fetches the models with a progress bar per model. Later starts
-work offline. Press `d` in the app, or run `qal-scribe setup`, to open it again; `s` opens the settings and `?` lists the
-keys. `--no-translate` starts without the translation model for one run. `qal-scribe models download [--translation]`
-fetches the models without starting. Ctrl+C cancels a download (the next start begins it again).
+The first start opens a setup screen that walks you through the permissions and downloads the models
+(about 3 GB, plus 2.5 GB if you want translation). After that it works offline. The full guide, including
+Linux, is in [docs/install.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/install.md).
 
-On Linux without an NVIDIA GPU, install the CPU build of PyTorch instead of the multi-GB CUDA one:
+## What it does
 
-```sh
-uv tool install --python 3.12 qal-scribe --torch-backend cpu
-```
+- **Dictate Amharic.** Hold **Right Option**, speak, release. The Amharic text is pasted where you are typing.
+- **Translate to English.** Hold **Right Command** (Linux: **Right Control**) instead, and the English
+  translation is pasted. Translation is optional: turn it off and the translation model is never downloaded.
+- **See it as you speak.** The window shows a live draft while you talk, a microphone level meter, and a
+  history of everything you said, ready to copy again.
+- **Five more languages, experimental.** Tigrinya, Afaan Oromo, Somali, Sidaama and Wolaytta run on the same
+  engine as rough drafts ([docs/languages.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/languages.md)).
+- **Private.** Your voice never leaves your computer. The only network use is downloading the models.
 
-uv does not remember `--torch-backend`, so upgrade with the same line plus `--upgrade` rather than with
-`uv tool upgrade`, which may fetch the multi-GB CUDA build.
+## First run
 
-`--python 3.12` matters: the language-model decoder has no builds for newer Pythons, and without it qal-scribe
-falls back to slightly less accurate greedy decoding (`qal-scribe doctor` warns about it). uv downloads Python 3.12
-if you do not have it.
+1. Run `qal-scribe`. The setup screen opens.
+2. **macOS:** turn on three permissions for the terminal app you started it from (Terminal, iTerm2, Ghostty, ...):
+   **Microphone**, **Input Monitoring** (so the keys work while another app is in front) and **Accessibility**
+   (so it can paste). Each row has an **Open Settings** button. Then quit the terminal with ⌘Q and open it again.
+   **Linux:** the screen shows the exact install command for anything missing.
+3. Choose whether you want **translation to English**, and which model.
+4. Press **Download**. Each model gets its own progress bar.
+5. Press **Continue**, click into any app, hold **Right Option** and speak.
 
-### macOS permissions
+Something not working? `qal-scribe doctor` checks everything and prints the fix for each problem.
+[docs/permissions.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/permissions.md) explains each permission.
 
-Give the terminal app you run qal-scribe from (Terminal, iTerm2, Ghostty, ...) these three permissions in
-System Settings > Privacy & Security, then quit and reopen the terminal:
-
-- **Microphone**, to hear you (macOS asks the first time you record).
-- **Input Monitoring**, so the hotkeys work while another app is in front.
-- **Accessibility**, to paste into that app.
-
-`qal-scribe doctor` shows which ones are missing.
-
-## Use
+## Keys
 
 | Key | What it does |
 |---|---|
-| Hold **Right Option**, speak, release | Amharic text is pasted at your cursor |
-| Hold **Right Command** (Linux: **Right Control**), speak, release | The English translation is pasted |
+| Hold **Right Option**, speak, release | paste the Amharic text at your cursor |
+| Hold **Right Command** (Linux: **Right Control**) | paste the English translation |
+| `c` | copy the last text |
+| `a` | copy the Amharic behind a translation |
+| `Enter` | copy the highlighted history row (`Esc` jumps back to the latest) |
+| `s` | settings |
+| `d` | setup: permissions and downloads |
+| `l` | switch language (when you have downloaded more than one) |
+| `t` / `m` | next colour theme / compact layout for a small window |
+| `?` | every key, as you configured them |
+| `q` | quit |
 
-Translation goes sentence by sentence, and the speech model writes no punctuation, so qal-scribe takes a pause of
-half a second as the end of a sentence: pause briefly between sentences when you translate.
+Both hotkeys can be changed in the settings (`s`). The other keys work in the qal-scribe window.
 
-Pasting goes through the clipboard: qal-scribe saves what you had copied and puts it back half a second later.
-While you speak, a live draft appears in the window (turn it off with `preview = false`).
+<details>
+<summary><b>Settings</b></summary>
 
-The terminal window shows the state (ready, recording, transcribing), a mic level meter and a history of what
-you said. Its keys: `c` copies the last text, `Enter` copies the highlighted history row, `l` switches language,
-`t` changes the theme, `m` toggles a compact 3-5 line layout for a small always-visible window, `q` quits.
-`qal-scribe --plain` prints one line per event instead, for logs or terminals without a full UI.
+Press `s` in the window to change the common settings; each one saves at once. Everything else lives in
+`config.toml`: `qal-scribe config --init` writes a commented copy and `qal-scribe config` prints where it is.
 
-### Linux (beta)
+| Setting | Default | What it does |
+|---|---|---|
+| `translation` | `true` | `false`: no translate key, and the translation model is never downloaded or loaded |
+| `dictate_key`, `translate_key` | `"alt_r"`, `"cmd_r"` (Linux `"ctrl_r"`) | the push-to-talk keys |
+| `mic` | system default | part of a microphone's name, or its number |
+| `numbers_to_digits` | `false` | write spoken numbers as digits: ሁለት ሺህ አስራ ሰባት → 2017 |
+| `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
+| `punctuation` | `false` | add ። ? and ፣ by rule (experimental) |
+| `preview` | `true` | a live draft while you speak |
 
-Text is typed with `wtype` (Wayland: sway, Hyprland, ...), `xdotool` (X11) or, on GNOME and KDE Wayland,
-pasted with `wl-copy` + `ydotool` (needs `ydotoold` running; terminals want Ctrl+Shift+V, so pasting into a
-terminal does not work there). Without any of them the text goes to the clipboard and the window says so.
-`qal-scribe doctor` tells you what to install.
+Every setting, with its default, is in [docs/settings.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/settings.md),
+including your own word corrections (`words.txt`) and how the experimental punctuation behaves.
 
-Before `uv tool install`, install PortAudio and the tools to build `evdev` (a keyboard library that has no
-ready-made build for Linux):
+</details>
+
+<details>
+<summary><b>Translation models</b></summary>
+
+Translation goes sentence by sentence, and the speech model writes no punctuation, so qal-scribe takes a
+pause of half a second as the end of a sentence: pause briefly between sentences when you translate.
+
+Pick the model on the setup screen, in the settings, or with `translation_model` in `config.toml`:
+
+| `translation_model` | Download | Licence |
+|---|---|---|
+| `nllb-600m` (default) | 2.5 GB | CC-BY-NC-4.0, non-commercial use only |
+| `nllb-1.3b` | 5.5 GB | CC-BY-NC-4.0, non-commercial use only |
+| `madlad-3b` | 11.8 GB | Apache-2.0 |
+
+Bigger models are slower and need more memory. On a machine with little memory, turn translation off: the
+translation model is then never loaded.
+
+</details>
+
+<details>
+<summary><b>Linux (beta)</b></summary>
+
+Before installing, get PortAudio and the tools to build `evdev` (a keyboard library with no ready-made build):
 
 ```sh
 sudo apt install libportaudio2 build-essential python3-dev      # Debian, Ubuntu
@@ -85,54 +128,58 @@ sudo dnf install portaudio gcc python3-devel kernel-headers      # Fedora
 sudo pacman -S portaudio base-devel                             # Arch
 ```
 
-Wayland does not let programs read global hotkeys, so bind two keys in your compositor or desktop settings to:
+Without an NVIDIA GPU, install the CPU build of PyTorch instead of the multi-GB CUDA one, and upgrade with the
+same line plus `--upgrade` (uv does not remember `--torch-backend`):
 
 ```sh
-qal-scribe toggle              # first press starts recording, second press pastes Amharic
-qal-scribe toggle --translate  # the same, pasting English
+uv tool install --python 3.12 qal-scribe --torch-backend cpu
 ```
 
-Linux has only been tested in CI and with simulated tools so far. Please report what works and what does not.
+Text is typed with `wtype` (sway, Hyprland), `xdotool` (X11), or on GNOME and KDE Wayland pasted with `wl-copy`
+plus `ydotool` (needs `ydotoold` running). Without any of them the text goes to the clipboard and the window
+says so. Wayland gives programs no global hotkeys, so bind two keys in your desktop settings to
+`qal-scribe toggle` and `qal-scribe toggle --translate`.
 
-## Settings
+Linux has only been tested in CI and with simulated tools so far. Please
+[report](https://github.com/kidus-der/qal-scribe/issues) what works and what does not.
 
-`qal-scribe config --init` writes a fully commented `~/.config/qal-scribe/config.toml` (or under
-`$XDG_CONFIG_HOME`) listing every setting with its default; `qal-scribe config` prints its path. The ones you are
-most likely to change:
+</details>
 
-| Setting | Default | |
-|---|---|---|
-| `dictate_key`, `translate_key` | `"alt_r"`, `"cmd_r"` (Linux: `"ctrl_r"`; Apple keyboards have no Right Control) | [pynput key names](https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key) such as `ctrl_r`, `shift_r`, `f13`; `translate_key = ""` turns translation off |
-| `mic` | system default | part of a microphone's name, or its number |
-| `numbers_to_digits` | `false` | write spoken numbers as digits: ሁለት ሺህ አስራ ሰባት → 2017 |
-| `merge_homophones` | `false` | spell sound-alike letters one way (ሐ ኀ → ሀ, ሠ → ሰ, ዐ ዓ → አ, ፀ → ጸ) |
-| `punctuation` | `false` | add ። ? and ፣ by rule (**experimental**, see below) |
-| `lm` | `true` | decode with the language model; `false` is plain greedy decoding |
-| `sounds` | `true` | short sound when recording starts and stops |
+<details>
+<summary><b>Troubleshooting</b></summary>
 
-Run `qal-scribe doctor` after editing to check the file.
+Start with `qal-scribe doctor`: it checks the permissions, microphone, compute device, config and models,
+and prints the fix next to each problem.
 
-### Your own words
+- **The keys do nothing while another app is in front.** Turn on Input Monitoring for your terminal, then quit
+  it with ⌘Q and reopen it.
+- **The text is not pasted.** Turn on Accessibility for your terminal. The text is also on the history list:
+  select it and press `Enter` to copy it.
+- **It pastes what you had copied before.** Some apps paste slowly; raise `restore_delay` (default `0.5` seconds).
+- **The language model is off.** `qal-scribe doctor` warns when Python is not 3.12: reinstall with
+  `uv tool install --python 3.12 --reinstall qal-scribe`.
+- **A download stopped.** Ctrl+C cancels a download; the next start, `qal-scribe setup` or
+  `qal-scribe models download --translation` begins it again.
 
-Put corrections in `~/.config/qal-scribe/words.txt`, one per line: `heard => wanted`, for example
-`ኤፒአይ => API`. Lines starting with `#` are ignored. The `wanted` text still goes through
-`merge_homophones` and `numbers_to_digits` when those are on, so a wanted word containing ዓ or a number word can
-change; turn those settings off if that happens.
+More answers in [docs/faq.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/faq.md).
 
-### Punctuation (experimental)
+</details>
 
-Amharic speech models write no punctuation. With `punctuation = true`, qal-scribe adds it with simple rules: ?
-after a sentence with a question word (ምን, ማን, የት, መቼ, እንዴት, ስንት, ...), ። otherwise, and ፣ before ነገር ግን, ሆኖም
-and ምክንያቱም. The rules prefer a missing mark to a wrong one, but they do make mistakes: an exclamation such as
-እንዴት ደስ ይላል gets ?, and a yes/no question without a question word (ዛሬ ትመጣለህ) gets ።. Check the text before
-you send it.
+<details>
+<summary><b>Privacy</b></summary>
 
-Spoken numbers have known traps too: አንድ ("a", "one") becomes 1 in አንድ ቀን, and the city አርባ ምንጭ becomes 40 ምንጭ.
+Recording, transcription and translation all happen on your computer. qal-scribe sends no audio, no text and
+no usage data anywhere. It goes online only to fetch the models from Hugging Face (and to look up their download
+sizes on the setup screen), the first time or when you choose a new one. Pasting uses the clipboard: qal-scribe saves what you had copied and puts it back half a
+second later.
 
-## Accuracy
+</details>
 
-Measured on the 516 clips of the FLEURS Amharic test split with `eval/evaluate.py` (lower is better; scoring folds
-homophone letters and drops punctuation):
+<details>
+<summary><b>Accuracy</b></summary>
+
+Measured on the 516 clips of the FLEURS Amharic test split with `eval/evaluate.py` (lower is better; scoring
+folds homophone letters and drops punctuation):
 
 | Decoding | CER | WER |
 |---|---|---|
@@ -140,24 +187,19 @@ homophone letters and drops punctuation):
 | with the language model (default) | 6.0 % | 14.4 % |
 | language model and `numbers_to_digits = true` | 4.5 % | 13.1 % |
 
-The language model removes about one word error in six and adds about 11 ms per clip. The FLEURS transcripts
-write numbers as digits, which is why `numbers_to_digits` scores better here; it stays off by default because of
-the traps described above. These numbers are for read speech; expect more errors with background noise, fast
-speech, names and English words (add those to your words file).
+These are for read speech; expect more errors with background noise, fast speech, names and English words
+(add those to your words file). On an Apple GPU a 10 s clip takes about 0.15 s.
 
-## More languages (experimental)
+</details>
 
-Tigrinya (`tir`), Afaan Oromo (`orm`), Somali (`som`), Sidaama (`sid`) and Wolaytta (`wal`) run through the same
-engine with other open models. They are rough drafts at best: see [docs/languages.md](https://github.com/kidus-der/qal-scribe/blob/main/docs/languages.md) for
-their accuracy and licences (the Somali model is non-commercial). Download one with
-`qal-scribe models download tir`, then press `l` in the window or set `language = "tir"`. Translation was only
-measured from Amharic (NLLB has no Sidaama or Wolaytta), and the text clean-up settings are made for Amharic.
-
-## Commands
+<details>
+<summary><b>Commands</b></summary>
 
 ```
 qal-scribe                     start dictating (terminal UI)
 qal-scribe --plain             the same, one line per event
+qal-scribe --no-translate      start without the translation model, for this run
+qal-scribe setup               permissions, translation choice and model downloads
 qal-scribe doctor              check permissions, microphone, device, config and models
 qal-scribe models              list languages and whether each model is downloaded
 qal-scribe models download [LANG] [--translation]
@@ -167,19 +209,30 @@ qal-scribe toggle [--translate]                start/stop recording in the runni
 qal-scribe about               licences and model attribution
 ```
 
-## Licence
+</details>
 
-The code is MIT licensed. The models are downloaded at run time and keep their own licences: the Amharic speech
-model is CC-BY-4.0 and the translation model is CC-BY-NC-4.0, which allows **non-commercial use only**.
-`qal-scribe about` lists them all.
+<details>
+<summary><b>Licences</b></summary>
 
-## Development
+The code is MIT licensed. The models are downloaded at run time and keep their own licences: the Amharic
+speech model, [snapwre/hohe-asr-amharic](https://huggingface.co/snapwre/hohe-asr-amharic), is CC-BY-4.0; the
+NLLB translation models are CC-BY-NC-4.0, which allows **non-commercial use only**; MADLAD-400 is Apache-2.0.
+`qal-scribe about` lists them all. The ቃል in the logo is drawn from Noto Sans Ethiopic (SIL Open Font
+License 1.1).
+
+</details>
+
+<details>
+<summary><b>Development</b></summary>
 
 ```sh
 uv sync
 uv run ruff check
 uv run pytest                  # no model weights are loaded
 uv run python scripts/gpu_lock.py -- uv run pytest -m model     # tests with the real models
+uv run python scripts/screenshots.py                            # redraw docs/assets/screens and demo.svg
 uv run python eval/fetch_fleurs.py && \
   uv run python scripts/gpu_lock.py -- uv run python eval/evaluate.py eval/data/fleurs-am-test --compare
 ```
+
+</details>
